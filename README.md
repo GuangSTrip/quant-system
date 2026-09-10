@@ -50,7 +50,20 @@ python3 -m quant_system --benchmark \
 python3 -m quant_system \
   --config configs/sota_production.yaml \
   --output reports/sota_production
+
+# 启动课程展示面板（仅监听本机，不读取券商凭据）
+python3 -m quant_system \
+  --dashboard \
+  --config configs/alpaca_paper.yaml \
+  --dashboard-report reports/sota_production
 ```
+
+浏览器打开 `http://127.0.0.1:8765`。面板读取已有的
+`metrics.json`、`equity_curve.csv`、`positions.csv`、`trades.csv`
+和本地审计日志，展示净值、回撤、绩效指标、期末持仓与成交记录。
+网页没有订单提交接口，也不会创建 Alpaca 客户端或读取 API 密钥；
+只允许监听 loopback 地址。安全卡可以设置本地 paper kill switch，
+恢复时必须输入确认文本，所有动作都会写入本地审计日志。
 
 核心产物：
 

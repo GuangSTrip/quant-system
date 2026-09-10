@@ -35,4 +35,9 @@ python3 -m unittest discover -s tests -v
 python3 -m quant_system --config configs/sota_production.yaml --output reports/sota_production
 ```
 
-随后可继续实现本地网页控制面板，优先展示净值、回撤、绩效指标、当前持仓、模拟盘订单和 kill switch。不要在没有 paper-only 凭据与人工复核时开启订单提交。
+本地网页控制面板已经实现，可通过 `python3 -m quant_system --dashboard
+--config configs/alpaca_paper.yaml --dashboard-report reports/sota_production`
+启动。它展示净值、回撤、绩效指标、期末持仓、回测成交、模拟盘审计和
+kill switch；固定监听本机地址，不读取凭据，且没有订单提交接口。
+恢复模拟盘需要二次确认。后续如扩展模拟盘订单展示，仍应保持只读，
+不要在没有 paper-only 凭据与人工复核时开启订单提交。

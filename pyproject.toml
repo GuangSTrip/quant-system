@@ -20,3 +20,6 @@ quant-system = "quant_system.cli:main"
 [tool.setuptools.packages.find]
 include = ["quant_system*"]
 
+[tool.setuptools.package-data]
+quant_system = ["dashboard_static/*.html", "dashboard_static/*.css", "dashboard_static/*.js"]
+
