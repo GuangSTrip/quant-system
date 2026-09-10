@@ -1,0 +1,24 @@
+engine:
+  initial_cash: 1000000
+
+costs:
+  commission_rate: 0.0003
+  slippage_bps: 2
+
+risk:
+  max_position_weight: 0.30
+  max_gross_leverage: 0.95
+  max_drawdown: 0.15
+  allow_short: false
+
+strategy:
+  name: sma_cross
+  params:
+    fast_window: 20
+    slow_window: 100
+    allocation: 0.90
+
+data:
+  type: csv
+  path: data/market_data.csv
+

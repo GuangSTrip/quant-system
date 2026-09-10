@@ -1,0 +1,53 @@
+engine:
+  initial_cash: 1000000
+  rebalance_threshold: 0.005
+  cash_buffer: 0.02
+
+costs:
+  commission_rate: 0.0003
+  slippage_bps: 2
+  spread_bps: 1
+  market_impact: 0.10
+  annual_cash_rate: 0.015
+
+risk:
+  max_position_weight: 0.35
+  max_gross_leverage: 0.95
+  max_drawdown: 0.18
+  drawdown_cooldown_days: 20
+  allow_short: false
+  target_volatility: 0.12
+  volatility_lookback: 60
+  min_volatility_scale: 0.25
+  max_volatility_scale: 1.0
+  max_daily_turnover: 0.35
+  max_volume_participation: 0.03
+
+strategy:
+  name: trend
+  params:
+    volatility_window: 40
+    allocation: 0.95
+    rebalance_interval: 5
+    long_short: false
+
+research:
+  train_fraction: 0.70
+  objective: robust_score
+  minimum_trades: 20
+  walk_forward_folds: 3
+  bootstrap_samples: 2000
+  bootstrap_block_size: 20
+  parameter_grid:
+    medium_window: [42, 63, 84]
+    long_window: [168, 252]
+  cost_stress_multipliers: [1.0, 2.0, 3.0, 5.0]
+
+data:
+  type: yahoo
+  symbols: [SPY, QQQ, IWM, TLT, GLD]
+  start: "2006-01-01"
+  end: "2026-08-13"
+  cache_path: data/etf_market.csv
+  prefer_cache: true
+

@@ -1,0 +1,32 @@
+engine:
+  initial_cash: 1000000
+  allow_fractional: false
+
+costs:
+  commission_rate: 0.0003
+  minimum_commission: 0
+  slippage_bps: 2
+
+risk:
+  max_position_weight: 0.35
+  max_gross_leverage: 1.0
+  max_drawdown: 0.20
+  allow_short: false
+
+strategy:
+  name: sma_cross
+  params:
+    fast_window: 20
+    slow_window: 100
+    allocation: 0.95
+    long_short: false
+
+data:
+  type: synthetic
+  symbols: [AAA, BBB, CCC]
+  start: "2020-01-01"
+  periods: 756
+  seed: 7
+  drift: 0.00025
+  volatility: 0.012
+
