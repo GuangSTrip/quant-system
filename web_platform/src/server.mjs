@@ -1,7 +1,7 @@
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,strategyConfig,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
 import {PAGE,CSS,CLIENT,FROZEN} from './assets.mjs';
+import {broker} from './transport.mjs';
 
-const ROOT='https://paper-api.alpaca.markets',DATA='https://data.alpaca.markets';
 const TERMINAL=['filled','canceled','expired','rejected','replaced'];
 const UNCERTAIN=['submitting','unknown'];
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'private, no-store','x-content-type-options':'nosniff'}});
@@ -39,20 +39,6 @@ async function body(request){
   requireValue(Number(request.headers.get('content-length')||0)<=20000,'请求过大',413);
   const text=await request.text();requireValue(text.length<=20000,'请求过大',413);
   try{const obj=JSON.parse(text);requireValue(obj&&typeof obj==='object'&&!Array.isArray(obj),'请求格式无效');return obj;}catch(e){if(e instanceof AppError)throw e;throw new AppError('JSON 格式错误');}
-}
-async function broker(env,path,{method='GET',payload,data=false,allow404=false}={}){
-  requireValue(env.ALPACA_PAPER_API_KEY&&env.ALPACA_PAPER_API_SECRET,'Paper 凭据未配置',503,'CREDENTIALS_MISSING');
-  let response;
-  try{response=await fetch((data?DATA:ROOT)+path,{method,redirect:'error',signal:AbortSignal.timeout(12000),headers:{'APCA-API-KEY-ID':env.ALPACA_PAPER_API_KEY,'APCA-API-SECRET-KEY':env.ALPACA_PAPER_API_SECRET,'accept':'application/json',...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify(payload)}:{})});}
-  catch{throw new AppError('Alpaca 请求超时或连接中断',502,'BROKER_UNCERTAIN');}
-  if(allow404&&response.status===404)return null;
-  if(!response.ok){
-    const text=await response.text();let message='';try{message=JSON.parse(text).message||'';}catch{}
-    for(const secret of [env.ALPACA_PAPER_API_KEY,env.ALPACA_PAPER_API_SECRET])if(secret)message=String(message).split(secret).join('[redacted]');
-    const e=new AppError('Alpaca '+response.status+(message?'：'+String(message).slice(0,220):''),response.status>=500?502:422,response.status>=500?'BROKER_UNCERTAIN':'BROKER_REJECTED');e.brokerStatus=response.status;throw e;
-  }
-  if(response.status===204)return {accepted:true};
-  try{return await response.json();}catch{throw new AppError('Alpaca 返回内容无法解析；需查询订单状态',502,'BROKER_UNCERTAIN');}
 }
 const pick=(o,keys)=>Object.fromEntries(keys.map(k=>[k,o?.[k]??null]));
 function cleanOrder(o){return pick(o,['id','client_order_id','symbol','side','type','time_in_force','qty','filled_qty','filled_avg_price','limit_price','stop_price','status','created_at','submitted_at','updated_at','filled_at','canceled_at']);}
@@ -101,7 +87,7 @@ async function submitOrder(env,db,user,input,plan=null){
     if(row){
       requireValue(row.request_hash===hash,'同一幂等键不能用于不同订单',409,'IDEMPOTENCY_CONFLICT');
       if(!TERMINAL.includes(row.status)){const found=await reconcileOne(env,db,row,user.id);if(found)return {ok:true,reused:true,order:found};}
-      return {ok:!UNCERTAIN.includes(row.status),reused:true,order:row.broker_data?JSON.parse(row.broker_data):{client_order_id:row.client_id,status:row.status},message:row.error||'该订单已处理，不会重复提交'};
+      return {ok:!UNCERTAIN.includes(row.status)&&row.status!=='rejected',reused:true,order:row.broker_data?JSON.parse(row.broker_data):{client_order_id:row.client_id,status:row.status},message:row.error||'该订单已处理，不会重复提交'};
     }
     if(plan)requireValue(Date.now()<=Date.parse(plan.expires_at),'订单计划已过期，请重新生成',409,'PLAN_EXPIRED');
     const uncertain=await first(db,"SELECT client_id FROM orders WHERE status IN ('submitting','unknown') LIMIT 1");
@@ -228,6 +214,51 @@ async function buildPlan(env,db,user,input){
   const payload={backtest_id:input.backtest_id,strategy_id:r.strategy_id,snapshot_id:r.snapshot_id,signal_timestamp:r.signal_timestamp,signal:r.signal,symbol:c.symbol,current_qty:current,target_qty:target,delta,reference,created_at:nowISO(),expires_at:new Date(Date.now()+300000).toISOString(),order:Math.abs(delta)>=1?{symbol:c.symbol,side:delta>0?'buy':'sell',qty:Math.floor(Math.abs(delta)),type:'limit',limit_price:reference.toFixed(2),time_in_force:'day'}:null,notes:'计划仅调整所选标的；不会清仓其他持仓。超过限额时请降低策略仓位重新回测。提交时重新校验行情、账户和风控。'};
   const id=await saveArtifact(db,user,'plan',c.name,payload);return {ok:true,id,...payload};
 }
+async function prepareAcceptance(env,db,user,input){
+  const sym=symbol(input.symbol||'SPY'),ctx=await accountContext(env),quote=await snapshotQuote(env,sym);
+  const reference=Number(quote.reference);requireValue(reference>0&&Number.isFinite(reference),'验收缺少参考价格',503);
+  const latestAge=(Date.parse(ctx.clock.timestamp)-Date.parse(quote.t))/1000;
+  const price=ctx.clock.is_open&&latestAge>=-5&&latestAge<=120&&Number(quote.ap)>0?Number(quote.ap):reference;
+  const report=await runBacktest(env,db,user,{config:{name:sym+' 课堂验收回测',symbol:sym,type:'buy_hold',allocation:.01,days:90,fast:5,slow:20,cost_bps:10}});
+  const dataset=await artifact(db,report.snapshot_id,'dataset'),replay=backtest(dataset.payload.bars,report.config);
+  const reproducible=await digest({metrics:report.metrics,curve:report.curve})===await digest({metrics:replay.metrics,curve:replay.curve});
+  const reconciliation=await reconcile(env,db,user);
+  const order=normalizeOrder({symbol:sym,side:'buy',type:'limit',qty:1,limit_price:(price*1.005).toFixed(2),time_in_force:'day'});
+  let check=null,riskError=null;try{check=riskCheck(order,await contextForOrder(env,db,order));}catch(error){riskError={code:error.code,message:error.message};}
+  const id=crypto.randomUUID(),cancelKey=crypto.randomUUID();
+  const payload={id,created_at:nowISO(),environment:'Alpaca Paper',symbol:sym,current_qty:Number(ctx.positions.find(p=>p.symbol===sym)?.qty||0),initial_cash:Number(ctx.account.cash),clock:ctx.clock,expires_at:new Date(Date.now()+300000).toISOString(),order,cancel_key:cancelKey,cancel_order:normalizeOrder({...order,limit_price:(price*.5).toFixed(2)}),backtest_id:report.id,snapshot_id:report.snapshot_id,check,risk_error:riskError,checks:[{name:'账户／市场时钟／持仓／订单接口',status:'passed',evidence:'实际 Alpaca Paper 响应，账户 '+ctx.account.status},{name:'IEX 行情与历史日线',status:'passed',evidence:dataset.payload.bars.length+' 根历史日线；行情时间 '+(quote.t||quote.reference_at)},{name:'同快照回测重跑',status:reproducible?'passed':'failed',evidence:'指标和完整曲线 SHA-256 对比'},{name:'交易前对账',status:reconciliation.ok?'passed':'failed',evidence:'净值差额 '+reconciliation.equity_difference+' USD；未决 '+reconciliation.unresolved}],notes:'本流程通过本平台订单引擎分别创建一笔 1 股买入限价单和一笔 1 股撤单测试单。买入限价为准备时参考价上浮 0.5%；撤单测试价为参考价的 50%。每笔均需确认并重新风控。不会自动卖出测试持仓；休市排队不算成交。'};
+  await saveArtifact(db,user,'acceptance',sym+' 模拟盘验收',payload,id);return {ok:true,run:payload};
+}
+async function acceptanceReport(db,id){
+  const run=(await artifact(db,id,'acceptance')).payload;
+  const row=await first(db,"SELECT payload FROM artifacts WHERE kind='acceptance_result' AND name=? ORDER BY created_at DESC LIMIT 1",id);
+  return {ok:true,run,latest:row?JSON.parse(row.payload):null};
+}
+async function inspectAcceptance(env,db,user,id){
+  const saved=(await artifact(db,id,'acceptance')).payload;
+  async function receipt(key){
+    const clientId='qs_'+key.replaceAll('-',''),local=await first(db,'SELECT * FROM orders WHERE client_id=?',clientId);
+    if(!local)return null;
+    const found=await findOrder(env,clientId);
+    if(found)return saveBrokerOrder(db,local,found,user.id,'acceptance_order_observed');
+    return {client_order_id:clientId,status:'unknown',filled_qty:null,filled_avg_price:null};
+  }
+  const fill=await receipt(id),cancel=await receipt(saved.cancel_key),reconciliation=await reconcile(env,db,user),ctx=await accountContext(env);
+  const currentQty=Number(ctx.positions.find(p=>p.symbol===saved.symbol)?.qty||0),delta=currentQty-saved.current_qty;
+  const filled=fill?.status==='filled'&&Number(fill.filled_qty)===1&&Number(fill.filled_avg_price)>0&&Number.isFinite(Date.parse(fill.filled_at));
+  const canceled=cancel?.status==='canceled'&&Number(cancel.filled_qty)===0;
+  const expected=Number(fill?.filled_qty||0)+Number(cancel?.filled_qty||0),positionOK=filled&&Math.abs(delta-expected)<1e-8;
+  const checks=[...saved.checks,
+    {name:'买入委托被券商接收',status:fill?.id&&fill.status!=='rejected'?'passed':fill?.status==='rejected'?'failed':'pending',evidence:fill?fill.client_order_id+' · '+fill.status:'尚未提交'},
+    {name:'1 股实际模拟成交',status:filled?'passed':fill&&['rejected','canceled','expired'].includes(fill.status)?'failed':'pending',evidence:filled?'券商 '+fill.id+'；成交价 '+fill.filled_avg_price+'；成交时间 '+fill.filled_at:ctx.clock.is_open?'等待券商成交回报':'市场休市；下次开市 '+ctx.clock.next_open},
+    {name:'独立撤单委托已撤销',status:canceled?'passed':Number(cancel?.filled_qty)>0?'failed':'pending',evidence:cancel?cancel.client_order_id+' · '+cancel.status+(Number(cancel.filled_qty)>0?'；已有成交不能撤回':''):'尚未运行撤单验证'},
+    {name:'持仓变化与本次成交相符',status:positionOK?'passed':'pending',evidence:'准备时 '+saved.current_qty+' 股，当前 '+currentQty+' 股，本次两笔委托合计成交 '+expected+' 股；其他同标的操作会影响差额'},
+    {name:'成交后账户与订单对账',status:!reconciliation.ok?'failed':filled?'passed':'pending',evidence:'净值差额 '+reconciliation.equity_difference+' USD；未决 '+reconciliation.unresolved+(filled?'':'；仍需等待实际成交')}
+  ];
+  const result={run_id:id,checked_at:nowISO(),environment:'Alpaca Paper',complete:checks.every(c=>c.status==='passed'),checks,receipts:{fill,cancel},positions:{initial:saved.current_qty,current:currentQty,delta,expected},reconciliation,clock:ctx.clock};
+  await saveArtifact(db,user,'acceptance_result',id,result);
+  return {ok:true,run:saved,latest:result};
+}
 async function overview(env,db){
   const c=await control(db);
   const results=await Promise.allSettled([broker(env,'/v2/account'),broker(env,'/v2/clock'),broker(env,'/v2/positions'),broker(env,'/v2/orders?status=all&limit=100&direction=desc&nested=false')]);
@@ -255,7 +286,8 @@ async function route(request,env){
     if(path==='/api/v1/equity'){const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
     if(path==='/api/v1/market'){const sym=symbol(url.searchParams.get('symbol'));return json({ok:true,symbol:sym,source:'Alpaca IEX',fetched_at:nowISO(),snapshot:await snapshotQuote(env,sym)});}
     if(path==='/api/v1/catalog')return json({ok:true,symbols:SYMBOLS,engine:ENGINE_VERSION,templates:[{type:'sma',name:'双均线趋势',description:'快均线高于慢均线时持有目标仓位，否则空仓。'},{type:'momentum',name:'绝对动量',description:'慢周期累计收益为正时持有目标仓位，否则空仓。'},{type:'buy_hold',name:'买入持有基准',description:'始终保持首次买入的目标仓位，用于同区间比较。'}]});
-    if(path==='/api/v1/artifacts'){const kind=url.searchParams.get('kind')||'backtest';requireValue(['backtest','strategy','dataset','plan'].includes(kind),'类别无效');return json({ok:true,items:await all(db,'SELECT id,kind,name,created_at FROM artifacts WHERE kind=? ORDER BY created_at DESC LIMIT 50',kind)});}
+    if(path==='/api/v1/artifacts'){const kind=url.searchParams.get('kind')||'backtest';requireValue(['backtest','strategy','dataset','plan','acceptance'].includes(kind),'类别无效');return json({ok:true,items:await all(db,'SELECT id,kind,name,created_at FROM artifacts WHERE kind=? ORDER BY created_at DESC LIMIT 50',kind)});}
+    if(path==='/api/v1/acceptance/report')return json(await acceptanceReport(db,url.searchParams.get('id')));
     if(path==='/api/v1/artifact'){return json({ok:true,...await artifact(db,url.searchParams.get('id'),url.searchParams.get('kind'))});}
     if(path==='/api/v1/audit'){
       await operator(request,env,db);const rows=await all(db,'SELECT * FROM events ORDER BY id DESC LIMIT 100');
@@ -265,6 +297,19 @@ async function route(request,env){
     throw new AppError('接口不存在',404,'NOT_FOUND');
   }
   const input=await body(request),user=await operator(request,env,db);
+  if(path==='/api/v1/acceptance/prepare')return json(await prepareAcceptance(env,db,user,input));
+  if(path==='/api/v1/acceptance/inspect')return json(await inspectAcceptance(env,db,user,input.id));
+  if(path==='/api/v1/acceptance/submit'){
+    const run=(await artifact(db,input.id,'acceptance')).payload;
+    return json(await submitOrder(env,db,user,{...run.order,idempotency_key:input.id,confirm:input.confirm,allow_queued:input.allow_queued},run));
+  }
+  if(path==='/api/v1/acceptance/cancel-check'){
+    const run=(await artifact(db,input.id,'acceptance')).payload;
+    const submitted=await submitOrder(env,db,user,{...run.cancel_order,idempotency_key:run.cancel_key,confirm:input.confirm,allow_queued:input.allow_queued});
+    requireValue(submitted.ok,'撤单验证订单未确认接收，请先对账',409,'UNRESOLVED_ORDER');
+    const canceled=await cancelOrders(env,db,user,'qs_'+run.cancel_key.replaceAll('-',''));
+    return json({...canceled,order:submitted.order});
+  }
   if(path==='/api/v1/orders/preview'){
     const o=normalizeOrder(input),ctx=await contextForOrder(env,db,o),check=riskCheck(o,ctx);return json({ok:true,order:o,...check});
   }

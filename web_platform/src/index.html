@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 模拟交易工作台</title><link rel="stylesheet" href="/styles.css?v=platform-4"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 模拟交易工作台</title><link rel="stylesheet" href="/styles.css?v=platform-5"></head>
 <body>
 <div class="app-shell">
   <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>课程交易平台</small></span></a>
@@ -9,6 +9,7 @@
       <button data-view="trade" class="nav">03 <span>模拟交易</span></button>
       <button data-view="risk" class="nav">04 <span>风控与对账</span></button>
       <button data-view="audit" class="nav">05 <span>操作审计</span></button>
+      <button data-view="acceptance" class="nav">06 <span>交付验收</span></button>
     </nav>
     <div class="sidebar-note"><strong>ALPACA PAPER</strong><p>美股与 ETF · USD<br>仅模拟资金</p><span id="identity-label">正在确认身份</span><a id="sign-in" href="/signin-with-chatgpt?return_to=%2F" target="_top" class="button subtle">登录以操作</a><a id="sign-out" href="/signout-with-chatgpt?return_to=%2F" target="_top" hidden>退出登录</a></div>
   </aside>
@@ -47,14 +48,20 @@
     </section>
 
     <section id="view-audit" class="view" hidden><article class="panel"><div class="panel-head"><div><p class="eyebrow">APPEND-ONLY EVENTS</p><h2>操作审计</h2></div><div class="actions"><button id="reload-audit" data-operator>刷新审计</button><button id="download-audit" data-operator>导出 JSON</button></div></div><p id="audit-integrity" class="caption">登录后可查看最近 100 条事件与完整性校验结果。</p><div id="audit-list" class="record-list"></div></article></section>
+    <section id="view-acceptance" class="view" hidden>
+      <article class="panel"><p class="eyebrow">PAPER ACCEPTANCE / BROKER EVIDENCE</p><h2>课堂实际操作验收</h2><p>用实际券商响应验证连接、历史数据、回测重跑、1 股模拟成交、独立撤单和对账。每次检查保留报告，只有全部项目确实通过才显示完成。</p><div class="form-row"><label>验收标的<select id="acceptance-symbol" aria-label="验收标的"></select></label><button id="acceptance-prepare" class="primary" data-operator>1. 检查连接、回测与对账</button></div><p class="caption">先登录，并在风控页恢复模拟交易。第一步不下单；后续两笔 1 股委托分别确认，继续使用平台全部风控。测试持仓不会自动出售。</p><p id="acceptance-message" role="status"></p></article>
+      <article class="panel"><div class="panel-head"><h2>验收记录</h2><button id="acceptance-history-refresh">刷新记录</button></div><label>选择已有记录<select id="acceptance-history"><option value="">尚未选择</option></select></label></article>
+      <article id="acceptance-report" class="panel" hidden><div class="panel-head"><div><p class="eyebrow">SAVED VERIFICATION REPORT</p><h2 id="acceptance-title">验收报告</h2></div><span id="acceptance-status" class="badge">未完成</span></div><p id="acceptance-time" class="caption"></p><div id="acceptance-details"></div><div id="acceptance-checks" class="record-list"></div><div class="notice" id="acceptance-notes"></div><label class="check"><input type="checkbox" id="acceptance-queued">休市时允许本次两笔限价委托排队；排队不代表已成交</label><div class="actions"><button id="acceptance-submit" class="primary" data-operator>2. 预览 1 股成交验证单</button><button id="acceptance-cancel" data-operator>3. 创建并撤销独立测试单</button><button id="acceptance-inspect" data-operator>4. 查询成交并更新报告</button><button id="acceptance-export">导出汇报文档</button><button id="acceptance-export-json">导出原始证据</button></div><p class="caption">页面可见且停留在此处时，每 30 秒查询已提交验收单。关闭页面不会取消券商委托；重新打开记录后可继续检查。</p></article>
+    </section>
     <footer>课程版 · Alpaca Paper 模拟资金。历史回测与模拟成交均不代表真实交易表现。当前支持单账户美股／ETF日频研究及手动模拟执行；不提供自动后台交易、高频、多租户或真实资金交易。</footer>
   </main>
 </div>
 <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-content"><div class="panel-head"><h2 id="help-title" tabindex="-1">使用说明 · 完整课堂流程</h2><button data-close="help-dialog" aria-label="关闭说明">×</button></div>
 <ol class="guide"><li><strong>查看实时账户</strong><p>总览显示模拟净值、现金、购买力、市场时钟、账户历史与持仓。页面可见时每 15 秒刷新账户和订单；行情查询为按需更新，行情时间可能早于读取时间。</p></li><li><strong>登录操作员</strong><p>左下角“登录以操作”使用站点所有者的 ChatGPT 账号。公开访客可查看；交易与风控按钮只对绑定的操作员开放。</p></li><li><strong>启用交易</strong><p>进入“风控与对账”，检查限额并点击“对账后恢复模拟交易”，输入“恢复模拟盘”。初始化默认为暂停。</p></li><li><strong>研究策略</strong><p>在“策略与回测”选择标的、模板、周期、仓位和成本，运行真实 IEX 历史日线回测。每份报告保留数据快照；勾选重跑可以验证复现。</p></li><li><strong>从计划到订单</strong><p>点击“生成模拟订单计划”，查看当前与目标仓位差异。计划 5 分钟内有效。它不会自动下单，提交时还会再次检查风控。</p></li><li><strong>手动提交</strong><p>也可在“模拟交易”填写标的、整数股数、类型和价格。点击预览后核对摘要，再确认提交 Paper 订单。休市时仅可明确允许限价单排队；有委托不等于已成交。</p></li><li><strong>撤单与对账</strong><p>订单列表可撤销本平台创建的未完成订单。撤单中需继续刷新确认。状态未知时先对账，不要换一个订单号反复重发。</p></li><li><strong>演示熔断</strong><p>风控页可暂停新增订单，或暂停并申请撤销本平台未完成订单。这是真正的服务器控制，不再是浏览器演示开关。</p></li></ol>
 <div class="notice">推荐课堂顺序：登录 → 查看行情 → 对账并恢复 → 回测 → 生成计划或手动小额限价单 → 提交 → 查看券商订单状态 → 撤单／对账 → 暂停。是否成交取决于市场时段、限价与 Alpaca 模拟撮合。</div>
+<p>需要课堂验收证据时，打开“交付验收”：先检查连接与回测，再分别确认 1 股成交验证单和撤单测试单，随后更新并导出报告。报告直接使用券商订单号、成交价、成交时间和对账结果；休市委托会保持“待完成”。</p>
 <p class="caption">此版本不运行后台自动交易，不执行任意策略代码，不覆盖助教文档的高频、机构多租户、AI编排和真实资金模块。暂时没有订单或持仓可以是正常状态。</p><button class="primary wide" data-close="help-dialog">知道了，返回平台</button></div></dialog>
 <dialog id="confirm-dialog" aria-labelledby="confirm-title"><div class="dialog-content"><div class="panel-head"><h2 id="confirm-title" tabindex="-1">确认模拟订单</h2><button data-close="confirm-dialog" aria-label="关闭">×</button></div><div id="confirm-details"></div><div id="confirm-error" class="notice error" role="alert" hidden></div><div class="actions"><button data-close="confirm-dialog">返回修改</button><button id="confirm-submit" class="primary">确认提交到 Alpaca Paper</button></div></div></dialog>
 <dialog id="action-dialog" aria-labelledby="action-title"><form id="action-form" class="dialog-content"><h2 id="action-title">确认操作</h2><p id="action-description"></p><label id="action-text-label" hidden>确认文本<input id="action-text" autocomplete="off" placeholder="恢复模拟盘"></label><p id="action-error" class="notice error" role="alert" hidden></p><div class="actions"><button type="button" data-close="action-dialog">取消</button><button class="primary" id="action-submit">确认</button></div></form></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="/app.js?v=platform-4" defer></script></body></html>
+<script src="/app.js?v=platform-5" defer></script></body></html>

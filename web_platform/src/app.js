@@ -1,8 +1,8 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity'};
-  const names = {overview:'账户总览',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计'};
+  const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false};
+  const names = {overview:'账户总览',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const types = {limit:'限价',market:'市价',stop:'止损市价',stop_limit:'止损限价'};
@@ -29,6 +29,7 @@
     document.querySelectorAll('[data-view]').forEach(e=>{e.classList.toggle('active',e.dataset.view===view);e.setAttribute('aria-current',e.dataset.view===view?'page':'false');});
     text('view-title',names[view]);if(location.hash!=='#'+view)history.replaceState(null,'','#'+view);
     if(view==='audit'&&state.session?.operator)loadAudit();
+    if(view==='acceptance')loadAcceptanceHistory();
   }
   async function loadSession(){
     try{state.session=await api('session');text('identity-label',state.session.operator?'操作员已登录':state.session.signed_in?'已登录 · 查看权限':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
@@ -136,6 +137,7 @@
       if(status==='unknown'||status==='submitting'){message('confirm-error',result.message||'状态未知，已暂停新增订单，请对账。',true);text('confirm-submit','查询同一笔订单结果');}
       else{clearPending();$('confirm-dialog').close();showView('trade');message('order-message',(result.reused?'查到已有订单：':'券商结果：')+(statusNames[status]||status||'请对账确认')+' · '+(result.order?.client_order_id||c.client_id)+(result.message?' · '+result.message:''),!result.ok);toast(result.ok?'订单结果已更新，请查看订单列表。':'券商未接受此订单。');}
       await refresh();
+      if(c.path==='acceptance/submit'){showView('acceptance');await inspectAcceptance();}
     }catch(e){if(e.code&&!['SERVICE_UNAVAILABLE','BROKER_UNCERTAIN','OPERATION_BUSY'].includes(e.code))clearPending();message('confirm-error',e.message+(state.pending?' 保留了同一订单号，可以继续查询。':' 请返回修改，或处理风控提示后再提交。'),true);text('confirm-submit',state.pending?'查询同一笔订单结果':'再次检查并提交');}
   });}
   let action=null;
@@ -147,6 +149,22 @@
   }
   function download(name,value,type='application/json'){const blob=new Blob([typeof value==='string'?value:JSON.stringify(value,null,2)],{type}),url=URL.createObjectURL(blob),a=node('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   function exportOrders(){const cols=['client_order_id','symbol','side','type','qty','filled_qty','filled_avg_price','status','created_at'];const cell=v=>{let s=String(v??'');if(typeof v==='string'&&/^[=+\-@]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};download('paper-orders.csv','\ufeff'+[cols,...filteredOrders().map(o=>cols.map(k=>o[k]))].map(row=>row.map(cell).join(',')).join('\r\n'),'text/csv;charset=utf-8');}
+  const verdict={passed:'通过',pending:'待完成',failed:'未通过'};
+  const acceptanceChecks=d=>d.latest?.checks||[...d.run.checks,...['买入委托被券商接收','1 股实际模拟成交','独立撤单委托已撤销','持仓变化与本次成交相符','成交后账户与订单对账'].map(name=>({name,status:'pending',evidence:'尚未完成交易验证，请按步骤操作后查询券商结果。'}))];
+  function renderAcceptance(data){
+    state.acceptance=data;const r=data.run,v=data.latest;$('acceptance-report').hidden=false;text('acceptance-title',r.symbol+' 模拟盘验收');text('acceptance-status',v?.complete?'全部验收通过':'尚有未完成项目');$('acceptance-status').className='badge '+(v?.complete?'good':'bad');text('acceptance-time','准备于 '+date(r.created_at)+' · 最新检查 '+date(v?.checked_at)+' · 验收号 '+r.id);
+    $('acceptance-details').replaceChildren(details([['成交验证单','买入 1 股 '+r.symbol+'，限价 '+money(r.order.limit_price)],['撤单测试单','买入 1 股 '+r.symbol+'，限价 '+money(r.cancel_order.limit_price)+'，接收后立即申请撤销'],['主委托有效准备期',date(r.expires_at)],['券商成交回报',v?.receipts.fill?(statusNames[v.receipts.fill.status]||v.receipts.fill.status)+' · '+v.receipts.fill.id:'尚无'],['实际成交价 / 股数',v?.receipts.fill?money(v.receipts.fill.filled_avg_price)+' / '+num(v.receipts.fill.filled_qty,6):'尚无']]));
+    $('acceptance-checks').replaceChildren(...acceptanceChecks(data).map(c=>{const e=node('div','record');e.append(node('strong',c.status==='passed'?'positive':c.status==='failed'?'negative':'',(verdict[c.status]||c.status)+' · '+c.name),node('p','caption',c.evidence));return e;}));text('acceptance-notes',r.notes+(r.risk_error?' 准备时风控提示：'+r.risk_error.message+'；处理后可再次预览，提交前会重新检查。':''));
+    text('acceptance-submit',v?.receipts.fill?'2. 查询已提交的成交验证单':'2. 预览 1 股成交验证单');syncAccess();
+  }
+  async function loadAcceptanceHistory(){try{const d=await api('artifacts?kind=acceptance'),select=$('acceptance-history');const option=node('option','','选择验收记录');option.value='';select.replaceChildren(option,...d.items.map(r=>{const o=node('option','',date(r.created_at)+' · '+r.name);o.value=r.id;return o;}));if(state.acceptance)select.value=state.acceptance.run.id;}catch(e){message('acceptance-message',e.message,true);}}
+  async function inspectAcceptance(){if(!state.acceptance||state.checkingAcceptance)return;state.checkingAcceptance=true;try{const d=await api('acceptance/inspect',{id:state.acceptance.run.id});renderAcceptance(d);message('acceptance-message',d.latest.complete?'全部验收通过，报告已保存，可导出汇报。':'检查结果已保存。尚未成交或撤单完成的项目仍显示待完成。');}catch(e){message('acceptance-message',e.message,true);}finally{state.checkingAcceptance=false;}}
+  async function previewAcceptance(){
+    if(state.pending){showConfirmation({...state.pending,recovery:true});return;}
+    const r=state.acceptance?.run;if(!r)return;if(state.acceptance.latest?.receipts.fill){await inspectAcceptance();return;}
+    const allow=$('acceptance-queued').checked,check=await api('orders/preview',r.order);if(check.queued&&!allow)throw new Error('当前休市，请先明确勾选允许限价委托排队。');showConfirmation({path:'acceptance/submit',payload:{id:r.id,confirm:true,allow_queued:allow},order:r.order,check,client_id:'qs_'+r.id.replaceAll('-','')});
+  }
+  function exportAcceptance(){const d=state.acceptance;if(!d)return;const r=d.run,v=d.latest,cell=s=>String(s??'').replaceAll('|','／').replaceAll('\n',' ');const lines=['# Alpaca Paper 课程实际操作验收报告','','验收号：'+r.id,'','准备时间：'+date(r.created_at),'','最新检查：'+date(v?.checked_at),'','结论：'+(v?.complete?'全部验收通过':'尚有未完成项目，不能作为完整成交验收通过的证明'),'','| 验收项 | 结果 | 实际证据 |','| --- | --- | --- |',...acceptanceChecks(d).map(c=>'| '+cell(c.name)+' | '+cell(verdict[c.status])+' | '+cell(c.evidence)+' |'),'','## 券商回报','','```json',JSON.stringify(v?.receipts||{fill:null,cancel:null},null,2),'```','','## 范围与说明','',r.notes,'','回测报告：'+r.backtest_id,'','行情快照：'+r.snapshot_id,'','平台：'+location.origin];download('paper-acceptance-'+r.id+'.md',lines.join('\n'),'text/markdown;charset=utf-8');}
   document.querySelectorAll('[data-view],[data-go]').forEach(e=>e.addEventListener('click',()=>showView(e.dataset.view||e.dataset.go)));
   window.addEventListener('hashchange',()=>showView(location.hash.slice(1)));
   document.querySelectorAll('[data-close]').forEach(e=>e.addEventListener('click',()=>$(e.dataset.close).close()));
@@ -163,15 +181,21 @@
   $('halt').addEventListener('click',()=>askAction('暂停新增订单','立即保存服务器暂停状态，已被券商接收的订单不受此按钮撤销。',()=>api('control',{halted:true})));
   $('kill').addEventListener('click',()=>askAction('暂停并撤单','立即暂停新增订单，并逐笔申请撤销本平台未完成订单。请在订单列表和对账中核对最终结果。',()=>api('control',{halted:true,cancel:true})));
   $('resume').addEventListener('click',()=>askAction('对账后恢复模拟交易','服务器将先对账并检查账户与亏损限额。请输入“恢复模拟盘”继续。',()=>api('control',{halted:false,confirm:$('action-text').value}),true));
-  $('action-form').addEventListener('submit',e=>{e.preventDefault();busy($('action-submit'),async()=>{try{const result=await action();$('action-dialog').close();if(result.results||result.canceled)text('reconcile-result',JSON.stringify(result.canceled||result,null,2));toast(result.message||'操作已保存。');await refresh();}catch(err){message('action-error',err.message,true);}});});
+  $('action-form').addEventListener('submit',e=>{e.preventDefault();busy($('action-submit'),async()=>{try{const result=await action();$('action-dialog').close();if(result.results||result.canceled)text('reconcile-result',JSON.stringify(result.canceled||result,null,2));toast(result.message||'操作已保存。');await refresh();if(location.hash==='#acceptance')await inspectAcceptance();}catch(err){message('action-error',err.message,true);}});});
   $('risk-form').addEventListener('input',()=>{state.riskDirty=true;});$('risk-form').addEventListener('submit',e=>{e.preventDefault();busy(e.submitter,async()=>{try{const settings=Object.fromEntries(new FormData(e.target));settings.max_position=Number(settings.max_position)/100;settings.max_loss=Number(settings.max_loss)/100;const d=await api('risk',settings);state.riskDirty=false;renderControl(d.control);toast('风控规则已保存并记录审计。');}catch(err){toast(err.message);}});});
   $('reconcile').addEventListener('click',doReconcile);$('reload-audit').addEventListener('click',loadAudit);$('download-audit').addEventListener('click',()=>download('quant-audit.json',state.audit));
+  $('acceptance-prepare').addEventListener('click',()=>busy($('acceptance-prepare'),async()=>{try{message('acceptance-message','正在读取实际账户和行情，运行回测重现与对账…');const d=await api('acceptance/prepare',{symbol:$('acceptance-symbol').value});renderAcceptance(d);await loadAcceptanceHistory();message('acceptance-message','验收记录已保存，尚未创建任何订单。处理风控提示后预览第 2 步。');}catch(e){message('acceptance-message',e.message,true);}}));
+  $('acceptance-history-refresh').addEventListener('click',loadAcceptanceHistory);$('acceptance-history').addEventListener('change',async e=>{if(!e.target.value)return;try{renderAcceptance(await api('acceptance/report?id='+encodeURIComponent(e.target.value)));}catch(err){message('acceptance-message',err.message,true);}});
+  $('acceptance-submit').addEventListener('click',()=>busy($('acceptance-submit'),async()=>{try{await previewAcceptance();}catch(e){message('acceptance-message',e.message,true);}}));
+  $('acceptance-cancel').addEventListener('click',()=>{const r=state.acceptance?.run;if(!r)return;if(state.pending){showConfirmation({...state.pending,recovery:true});return;}const allow=$('acceptance-queued').checked;if(!state.overview?.clock?.is_open&&!allow){message('acceptance-message','休市时请先勾选允许本次限价委托排队。',true);return;}askAction('确认独立撤单验证','将以 '+money(r.cancel_order.limit_price)+' 买入 1 股 '+r.symbol+'，随后立即申请撤销。这会实际向 Alpaca Paper 提交额外一笔订单；如果已成交，成交部分不能撤回。重复此步骤只查询／撤销同一个订单号。',()=>api('acceptance/cancel-check',{id:r.id,confirm:true,allow_queued:allow}));});
+  $('acceptance-inspect').addEventListener('click',()=>busy($('acceptance-inspect'),inspectAcceptance));$('acceptance-export').addEventListener('click',exportAcceptance);$('acceptance-export-json').addEventListener('click',()=>{if(state.acceptance)download('paper-acceptance-'+state.acceptance.run.id+'.json',state.acceptance);});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
   async function init(){
     syncAccess();updateOrderFields();showView(location.hash.slice(1));
-    try{const pending=JSON.parse(sessionStorage.getItem('quant.pending.v1')||'null');if(pending?.client_id&&['orders','plans/submit'].includes(pending.path)&&pending.payload&&pending.order)state.pending=pending;}catch{}renderPending();
-    const symbols=['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT'];for(const id of ['quote-symbol','research-symbol','order-symbol'])$(id).replaceChildren(...symbols.map(s=>{const o=node('option','',s);o.value=s;return o;}));
+    try{const pending=JSON.parse(sessionStorage.getItem('quant.pending.v1')||'null');if(pending?.client_id&&['orders','plans/submit','acceptance/submit'].includes(pending.path)&&pending.payload&&pending.order)state.pending=pending;}catch{}renderPending();
+    const symbols=['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT'];for(const id of ['quote-symbol','research-symbol','order-symbol','acceptance-symbol'])$(id).replaceChildren(...symbols.map(s=>{const o=node('option','',s);o.value=s;return o;}));
     await loadSession();await Promise.allSettled([refresh(),loadEquity(),loadQuote(),loadResearch()]);if(location.hash==='#audit'&&state.session?.operator)loadAudit();setInterval(()=>{if(!document.hidden)refresh();},15000);
+    setInterval(()=>{if(!document.hidden&&location.hash==='#acceptance'&&state.session?.operator&&state.acceptance?.latest?.receipts.fill&&!state.acceptance.latest.complete)inspectAcceptance();},30000);
   }
   init();
 })();
