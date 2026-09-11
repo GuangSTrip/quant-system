@@ -10,7 +10,7 @@ async function prepare(f){
 const clientId=key=>'qs_'+key.replaceAll('-','');
 const submit=(f,run,extra={})=>f.request('/api/v1/acceptance/submit',{id:run.id,confirm:true,...extra});
 const inspect=(f,run)=>f.request('/api/v1/acceptance/inspect',{id:run.id});
-const cancelCheck=(f,run)=>f.request('/api/v1/acceptance/cancel-check',{id:run.id,confirm:true});
+const cancelCheck=(f,run,extra={})=>f.request('/api/v1/acceptance/cancel-check',{id:run.id,confirm:true,...extra});
 function fill(f,run){
   Object.assign(f.broker.orders.get(clientId(run.id)),{status:'filled',filled_qty:'1',filled_avg_price:'100',filled_at:new Date().toISOString()});
   f.broker.positions=[{symbol:'SPY',qty:'1',market_value:'100'}];
@@ -46,9 +46,13 @@ test('closed-market acceptance requires queue consent and never treats an accept
   assert.equal(report.complete,false);
   assert.equal(report.checks.find(c=>c.name==='1 股实际模拟成交').status,'pending');
   assert.equal(report.checks.find(c=>c.name==='成交后账户与订单对账').status,'pending');
+  f.broker.orders.get(clientId(run.id)).status='rejected';
+  assert.equal((await submit(f,run,{allow_queued:true})).data.ok,false);
+  assert.equal(f.broker.posts().length,1);
 });
 
 test('acceptance requires filled receipt, separate confirmed cancellation, holdings and reconciliation; report persists',async t=>{
+  const logs=[],originalInfo=console.info;console.info=value=>logs.push(JSON.parse(value));t.after(()=>{console.info=originalInfo;});
   const f=setup(t);await f.resume();const run=await prepare(f);
   assert.equal((await submit(f,run)).data.ok,true);fill(f,run);
   assert.equal((await inspect(f,run)).data.latest.complete,false);
@@ -64,6 +68,8 @@ test('acceptance requires filled receipt, separate confirmed cancellation, holdi
   const saved=await f.request('/api/v1/acceptance/report?id='+run.id,undefined,{auth:false});
   assert.deepEqual(saved.data.latest,result.data.latest);
   assert.equal(f.db.get("SELECT COUNT(*) n FROM artifacts WHERE kind='acceptance_result' AND name=?",run.id).n,2);
+  assert.ok(logs.some(e=>e.event==='paper_order_receipt'&&e.status==='filled'&&e.filled_avg_price==='100'&&e.filled_at));
+  assert.ok(logs.some(e=>e.event==='paper_acceptance_result'&&e.run_id===run.id&&e.complete===true&&e.position_delta===1&&e.checks.length===9));
 });
 
 test('acceptance refuses incomplete fill evidence, holdings mismatch and cash-equity mismatch',async t=>{
@@ -94,6 +100,7 @@ test('acceptance blocks expired or changed-holdings plans before broker submissi
 });
 
 test('acceptance cannot return a successful report if saving the evidence fails',async t=>{
+  const logs=[],originalInfo=console.info;console.info=value=>logs.push(JSON.parse(value));t.after(()=>{console.info=originalInfo;});
   const f=setup(t);await f.resume();const run=await prepare(f);
   await submit(f,run);fill(f,run);await cancelCheck(f,run);
   f.db.fail=sql=>sql.startsWith('INSERT INTO artifacts');
@@ -102,4 +109,16 @@ test('acceptance cannot return a successful report if saving the evidence fails'
   assert.equal(result.data.ok,false);
   f.db.fail=null;
   assert.equal((await f.request('/api/v1/acceptance/report?id='+run.id)).data.latest,null);
+  assert.equal(logs.filter(e=>e.event==='paper_acceptance_result').length,0);
+});
+
+test('cancel acceptance recovery remains idempotent across market opening and changed queue consent',async t=>{
+  const f=setup(t);await f.resume();f.broker.clock.is_open=false;const run=await prepare(f);
+  assert.equal((await cancelCheck(f,run,{allow_queued:true})).status,200);
+  f.broker.clock.is_open=true;
+  const recovered=await cancelCheck(f,run,{allow_queued:false});
+  assert.equal(recovered.status,200);
+  assert.equal(recovered.data.results[0].status,'canceled');
+  assert.equal(f.broker.posts().length,1);
+  assert.equal((await cancelCheck(f,run,{confirm:false})).status,400);
 });

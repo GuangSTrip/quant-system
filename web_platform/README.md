@@ -66,7 +66,7 @@ npm run validate
 
 账户、时钟、持仓和订单同时“超时”的根因是 Workerd 不支持 `fetch` 的 `redirect: 'error'`；请求在网络发送前就抛异常。现已改为 `manual` 并显式拒绝全部 3xx，保留固定 Paper 主机。实际生产日志已记录六类 Alpaca 请求返回 HTTP 200。
 
-Node 34 项、原 Python 29 项全量测试通过；另在真实 Workerd 中验证 GET、POST、DELETE、404、重定向拒绝与脱敏。Workerd 回归使用服务绑定替身，不发出外部订单。具备该运行时后执行：
+Node 35 项、原 Python 29 项全量测试通过；另在真实 Workerd 中验证 GET、POST、DELETE、404、重定向拒绝与脱敏。Workerd 回归使用服务绑定替身，不发出外部订单。具备该运行时后执行：
 
 ```sh
 workerd test tests/workerd/transport.capnp

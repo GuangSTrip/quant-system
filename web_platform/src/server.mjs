@@ -69,6 +69,7 @@ async function release(db,id){await run(db,'UPDATE control SET lease_id=NULL,lea
 async function saveBrokerOrder(db,row,order,actor,kind='order_status'){
   const clean=cleanOrder(order);
   await db.batch([db.prepare('UPDATE orders SET broker_id=?,status=?,broker_data=?,error=NULL,updated_at=? WHERE client_id=?').bind(order.id,order.status,JSON.stringify(clean),nowISO(),row.client_id),await auditStatement(db,actor,kind,row.client_id,{status:order.status,filled_qty:order.filled_qty,broker_id:order.id})]);
+  console.info(JSON.stringify({event:'paper_order_receipt',observed_at:nowISO(),action:kind,environment:'Alpaca Paper',client_order_id:row.client_id,broker_order_id:clean.id,symbol:clean.symbol,side:clean.side,status:clean.status,filled_qty:clean.filled_qty,filled_avg_price:clean.filled_avg_price,filled_at:clean.filled_at}));
   return clean;
 }
 async function findOrder(env,id){return broker(env,'/v2/orders:by_client_order_id?client_order_id='+encodeURIComponent(id),{allow404:true});}
@@ -86,7 +87,7 @@ async function submitOrder(env,db,user,input,plan=null){
     let row=await first(db,'SELECT * FROM orders WHERE client_id=?',clientId);
     if(row){
       requireValue(row.request_hash===hash,'同一幂等键不能用于不同订单',409,'IDEMPOTENCY_CONFLICT');
-      if(!TERMINAL.includes(row.status)){const found=await reconcileOne(env,db,row,user.id);if(found)return {ok:true,reused:true,order:found};}
+      if(!TERMINAL.includes(row.status)){const found=await reconcileOne(env,db,row,user.id);if(found)return {ok:found.status!=='rejected',reused:true,order:found};}
       return {ok:!UNCERTAIN.includes(row.status)&&row.status!=='rejected',reused:true,order:row.broker_data?JSON.parse(row.broker_data):{client_order_id:row.client_id,status:row.status},message:row.error||'该订单已处理，不会重复提交'};
     }
     if(plan)requireValue(Date.now()<=Date.parse(plan.expires_at),'订单计划已过期，请重新生成',409,'PLAN_EXPIRED');
@@ -257,6 +258,7 @@ async function inspectAcceptance(env,db,user,id){
   ];
   const result={run_id:id,checked_at:nowISO(),environment:'Alpaca Paper',complete:checks.every(c=>c.status==='passed'),checks,receipts:{fill,cancel},positions:{initial:saved.current_qty,current:currentQty,delta,expected},reconciliation,clock:ctx.clock};
   await saveArtifact(db,user,'acceptance_result',id,result);
+  console.info(JSON.stringify({event:'paper_acceptance_result',run_id:id,checked_at:result.checked_at,complete:result.complete,checks:checks.map(c=>({name:c.name,status:c.status})),fill_order_id:fill?.id||null,cancel_order_id:cancel?.id||null,position_delta:delta,expected_position_delta:expected,equity_difference:reconciliation.equity_difference,unresolved:reconciliation.unresolved}));
   return {ok:true,run:saved,latest:result};
 }
 async function overview(env,db){
@@ -305,9 +307,14 @@ async function route(request,env){
   }
   if(path==='/api/v1/acceptance/cancel-check'){
     const run=(await artifact(db,input.id,'acceptance')).payload;
+    requireValue(input.confirm===true,'请在网页摘要中确认撤单验证');
+    const clientId='qs_'+run.cancel_key.replaceAll('-','');
+    // Recovery must query/cancel the original order even when the market has
+    // opened and the user no longer needs the queue-consent checkbox.
+    if(await first(db,'SELECT client_id FROM orders WHERE client_id=?',clientId))return json(await cancelOrders(env,db,user,clientId));
     const submitted=await submitOrder(env,db,user,{...run.cancel_order,idempotency_key:run.cancel_key,confirm:input.confirm,allow_queued:input.allow_queued});
     requireValue(submitted.ok,'撤单验证订单未确认接收，请先对账',409,'UNRESOLVED_ORDER');
-    const canceled=await cancelOrders(env,db,user,'qs_'+run.cancel_key.replaceAll('-',''));
+    const canceled=await cancelOrders(env,db,user,clientId);
     return json({...canceled,order:submitted.order});
   }
   if(path==='/api/v1/orders/preview'){
