@@ -4,6 +4,22 @@
 
 > 重要：不存在能够诚实保证未来“高且为正”收益的系统。本项目把目标定义为建立**可检验的正期望证据**：未参与选参的样本外收益、walk-forward 一致性、成本压力、Bootstrap 置信区间、基准超额和风险门禁。只有这些证据共同通过，策略才值得进入模拟盘。
 
+## 在线课程交易平台
+
+现已提供可实际操作 Alpaca Paper 的 [在线课程平台](https://quant-system-course-dashboard.able-stork-1502.chatgpt.site)。网页包括真实行情和账户、可参数化回测与数据快照、订单计划、预检／确认提交、撤单、服务端风控、对账和审计。点击右上角「使用说明」可查看完整课堂流程。
+
+公开访客可以查看，站点所有者通过 ChatGPT 登录后可以操作。首次交易需在风控页对账并恢复。代码位于 [`web_platform/`](web_platform/README.md)，交付范围与验收见 [课程验收说明](web_platform/COURSE_ACCEPTANCE.md)。该平台为单账户美股／ETF日频研究与手动 Paper 执行；原有 Python 多资产研究、本地只读面板与此在线执行服务各自保留清晰入口。
+
+```bash
+cd web_platform
+npm ci
+npm run build
+npm test
+npm run validate
+```
+
+网页测试要求 Node.js 24。原 Python 全量测试 29 项通过，新平台测试 27 项通过。模拟券商响应测试不等于已在在线账户完成成交。
+
 ## 系统能力
 
 | 层 | 已实现 |

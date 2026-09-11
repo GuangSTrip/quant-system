@@ -39,5 +39,16 @@ python3 -m quant_system --config configs/sota_production.yaml --output reports/s
 --config configs/alpaca_paper.yaml --dashboard-report reports/sota_production`
 启动。它展示净值、回撤、绩效指标、期末持仓、回测成交、模拟盘审计和
 kill switch；固定监听本机地址，不读取凭据，且没有订单提交接口。
-恢复模拟盘需要二次确认。后续如扩展模拟盘订单展示，仍应保持只读，
-不要在没有 paper-only 凭据与人工复核时开启订单提交。
+该本地面板仍用于读取原有研究产物；在线课程平台使用下面的独立服务端执行入口。
+
+## 在线交付状态 · 2026-09-11
+
+用户已明确要求并授权公开部署与实际 Alpaca Paper 操作。在线地址为 https://quant-system-course-dashboard.able-stork-1502.chatgpt.site ，Sites 版本 3 已发布。站点源码提交为 `aead4f59f75e014322089f632d8171b019370fff`；本仓库 `web_platform/` 保存对应可构建源码。
+
+在线平台包括账户／订单轮询、IEX 行情、三种参数策略回测、持久化数据快照、订单计划、预检与人工确认提交、逐笔／批量撤单、服务端暂停／恢复、限额修改、对账与审计。操作员以站点所有者的 ChatGPT 身份登录，服务端凭据已配置。首次交易需对账并恢复；浏览器不接收券商密钥。
+
+订单意图必须先持久化再发送。幂等 ID 防止重复提交，超时后查券商记录；无法确认时阻断新增，主动对账恢复。状态和审计使用 D1，迁移在 `web_platform/drizzle/`。所有交易端点固定到 Paper。
+
+验证：Python 29 项、新网页 27 项自动化测试通过，生产产物验证通过。新网页自动化测试使用真实 SQLite 和模拟 HTTP；不宣称已完成浏览器人工验收或实际券商成交。课堂操作步骤和能力边界见 `web_platform/COURSE_ACCEPTANCE.md`。
+
+此版本未提供后台自动策略交易、高频、任意代码沙箱、机构多租户、AI 编排或真实资金交易；原 Python 多资产策略和网页单标的研究使用不同引擎，不把二者的回测结果混为一谈。
