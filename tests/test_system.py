@@ -12,6 +12,7 @@ from quant_system.benchmarking import BenchmarkRunner
 from quant_system.broker import AlpacaPaperBroker, Order, OrderStatus, PaperBroker
 from quant_system.config import CostConfig, PaperTradingConfig, RiskConfig, SystemConfig, load_config
 from quant_system.data import align_panel, data_quality_report, generate_synthetic_data, validate_bars
+from quant_system.dashboard import DashboardStore, serve_dashboard
 from quant_system.performance import (
     calculate_metrics,
     expected_maximum_sharpe,
@@ -393,6 +394,42 @@ class QuantSystemTests(unittest.TestCase):
                 broker.set_halted(True, "test")
                 with self.assertRaisesRegex(PermissionError, "kill switch"):
                     broker.submit(Order("AAA", 1, pd.Timestamp("2025-01-01")))
+
+    def test_dashboard_reads_reports_without_credentials_and_controls_local_halt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "configs").mkdir()
+            (root / "reports" / "demo").mkdir(parents=True)
+            (root / "configs" / "dashboard.yaml").write_text(
+                "\n".join(
+                    [
+                        "paper_trading:",
+                        "  enabled: false",
+                        "  state_directory: .paper_state",
+                        "  audit_log_path: reports/paper_trading/audit.jsonl",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            data = generate_synthetic_data(["AAA", "BBB"], periods=30, seed=17)
+            result = Backtester(SystemConfig(), AlwaysLongStrategy()).run(data)
+            result.save(str(root / "reports" / "demo"))
+            store = DashboardStore(
+                "reports/demo", "configs/dashboard.yaml", root=root
+            )
+            with patch("os.getenv", side_effect=AssertionError("credentials must not be read")):
+                snapshot = store.snapshot()
+            self.assertTrue(snapshot["report"]["available"])
+            self.assertFalse(snapshot["safety"]["credentials_accessed"])
+            self.assertFalse(snapshot["safety"]["order_submission_available"])
+            store.set_halted(True)
+            self.assertTrue(store.snapshot()["safety"]["kill_switch_active"])
+            store.set_halted(False)
+            self.assertFalse(store.snapshot()["safety"]["kill_switch_active"])
+
+    def test_dashboard_refuses_non_loopback_binding(self):
+        with self.assertRaisesRegex(ValueError, "local-only"):
+            serve_dashboard("reports/demo", "configs/demo.yaml", "0.0.0.0", 8765)
 
 
 if __name__ == "__main__":

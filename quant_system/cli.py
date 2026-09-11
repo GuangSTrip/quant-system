@@ -20,6 +20,7 @@ from .data import data_quality_report
 from .research import ResearchRunner
 from .live import build_paper_plan
 from .strategies import build_ensemble, build_strategy
+from .dashboard import add_dashboard_arguments, serve_dashboard
 
 
 def _percent(value: float) -> str:
@@ -163,6 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     paper_group.add_argument("--paper-halt", action="store_true", help="Activate local paper-trading kill switch")
     paper_group.add_argument("--paper-resume", action="store_true", help="Clear local paper-trading kill switch")
     parser.add_argument("--confirm-paper-orders", action="store_true", help="Explicitly submit --paper-plan to Alpaca paper")
+    add_dashboard_arguments(parser)
     return parser
 
 
@@ -170,6 +172,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     if args.confirm_paper_orders and not args.paper_plan:
         raise ValueError("--confirm-paper-orders requires --paper-plan")
+    if args.dashboard:
+        return serve_dashboard(
+            args.dashboard_report or args.output,
+            args.config,
+            args.dashboard_host,
+            args.dashboard_port,
+        )
     if args.paper_status:
         return run_paper_status(args.config)
     if args.paper_plan:

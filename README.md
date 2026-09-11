@@ -4,6 +4,26 @@
 
 > 重要：不存在能够诚实保证未来“高且为正”收益的系统。本项目把目标定义为建立**可检验的正期望证据**：未参与选参的样本外收益、walk-forward 一致性、成本压力、Bootstrap 置信区间、基准超额和风险门禁。只有这些证据共同通过，策略才值得进入模拟盘。
 
+## 在线课程交易平台
+
+现已提供可实际操作 Alpaca Paper 的 [在线课程平台](https://quant-system-course-dashboard.able-stork-1502.chatgpt.site)。网页包括真实行情和账户、可参数化回测与数据快照、订单计划、预检／确认提交、撤单、服务端风控、对账和审计。点击右上角「使用说明」可查看完整课堂流程。
+
+公开访客可以查看，使用独立的课程账号和密码登录后可以操作，无需 OpenAI 账号。持有课程账号的人共享同一个模拟账户；会话 8 小时过期，退出立即撤销。首次交易需在风控页对账并恢复。代码位于 [`web_platform/`](web_platform/README.md)，交付范围与验收见 [课程验收说明](web_platform/COURSE_ACCEPTANCE.md)。该平台为单账户美股／ETF日频研究与手动 Paper 执行；原有 Python 多资产研究、本地只读面板与此在线执行服务各自保留清晰入口。
+
+组员独立部署只需三步：**获取代码并进入 `web_platform` → `npm ci` → `npm run deploy`**。提前准备 Node.js 24、自己的 Cloudflare 账户和 Alpaca Paper Key ID／Secret Key。向导配置独立网站账号、数据库与公开网址，不依赖 OpenAI 账号。详细步骤、服务额度、更新和故障恢复见 [三步部署说明](web_platform/DEPLOY.md)。
+
+```bash
+cd web_platform
+npm ci
+npm run build
+npm test
+npm run validate
+```
+
+网页测试要求 Node.js 24。原 Python 全量测试 29 项通过，新平台测试 47 项通过；另通过真实 Workerd 传输与密码认证兼容性回归。已修复造成全部账户接口同时报超时的 Workers 请求参数不兼容，生产日志确认账户／时钟／持仓／订单／行情／净值历史读取成功。
+
+「交付验收」页面可实际提交 1 股成交验证单和独立撤单测试单，保存九项检查及券商原始回报，并导出汇报文档。完整成交结论只在收到实际成交、撤单和持仓／账户对账证据后给出。本次尚未取得实际成交回报；模拟券商响应测试不等于在线账户成交证明。详见 [在线验证记录](web_platform/ONLINE_VERIFICATION.md)。
+
 ## 系统能力
 
 | 层 | 已实现 |
@@ -50,7 +70,20 @@ python3 -m quant_system --benchmark \
 python3 -m quant_system \
   --config configs/sota_production.yaml \
   --output reports/sota_production
+
+# 启动课程展示面板（仅监听本机，不读取券商凭据）
+python3 -m quant_system \
+  --dashboard \
+  --config configs/alpaca_paper.yaml \
+  --dashboard-report reports/sota_production
 ```
+
+浏览器打开 `http://127.0.0.1:8765`。面板读取已有的
+`metrics.json`、`equity_curve.csv`、`positions.csv`、`trades.csv`
+和本地审计日志，展示净值、回撤、绩效指标、期末持仓与成交记录。
+网页没有订单提交接口，也不会创建 Alpaca 客户端或读取 API 密钥；
+只允许监听 loopback 地址。安全卡可以设置本地 paper kill switch，
+恢复时必须输入确认文本，所有动作都会写入本地审计日志。
 
 核心产物：
 
