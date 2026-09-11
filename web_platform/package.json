@@ -3,14 +3,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bash scripts/build.sh",
+    "build": "node scripts/build.mjs",
     "validate": "node scripts/validate-artifact.mjs",
     "test": "node --test tests/*.test.mjs",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:verify": "node scripts/deploy.mjs --verify",
+    "deploy:check": "node scripts/deploy.mjs --dry-run",
+    "password:reset": "node scripts/deploy.mjs --reset-password",
+    "test:runtime": "workerd test tests/workerd/transport.capnp && workerd test tests/workerd/auth.capnp"
   },
   "devDependencies": {
     "drizzle-kit": "0.31.10",
     "drizzle-orm": "0.45.2",
-    "esbuild": "0.28.0"
+    "esbuild": "0.28.0",
+    "wrangler": "4.131.0"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

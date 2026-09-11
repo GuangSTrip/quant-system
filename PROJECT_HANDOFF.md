@@ -60,3 +60,10 @@ kill switch；固定监听本机地址，不读取凭据，且没有订单提交
 版本 8 使用 `AUTH_USERNAME` 与秘密 `AUTH_PASSWORD_RECORD`，不再使用 `OPERATOR_EMAIL` 或 OpenAI 身份头。密码盐和 PBKDF2 校验记录只配置在服务端；会话令牌以 Secure／HttpOnly／SameSite=Strict Cookie 传递，数据库保存其摘要，8 小时过期，退出立即撤销当前会话。修改账号或密码记录使旧会话失效。新增迁移只增加 `auth_sessions`、`auth_limits`，不改写旧迁移或交易数据；旧 `owner_id` 字段保留作历史数据而不参与授权。登录密码单独交付，不放在仓库或网页代码中。
 
 此版本未提供后台自动策略交易、高频、任意代码沙箱、机构多租户、AI 编排或真实资金交易；原 Python 多资产策略和网页单标的研究使用不同引擎，不把二者的回测结果混为一谈。
+
+
+## 2026-09-11 独立部署交付
+
+`web_platform/DEPLOY.md` 是组员部署入口：获取代码进入目录、`npm ci`、`npm run deploy`。Node 构建不再依赖 Bash。锁定 Wrangler 4.131.0 的向导负责 Cloudflare OAuth、账户选择、独立 D1、迁移、Paper 凭证预检、密码生成、秘密上传、公开部署和在线读／认证检查；提供更新保留数据、单独在线复查、密码重置与本地 dry-run。独立部署不复用原 Sites 项目身份。
+
+验证：47 项 Node、29 项 Python，通过 Wrangler 实际 dry-run、两份 SQL 本地 D1 迁移和 workerd 2026-09-10 传输／认证回归。尚无组员 Cloudflare 账户的远端首部署证据，实际券商成交也仍待页面验收，不能将本地验证记作远端成交。详细前置条件、Workers CPU 额度、失败恢复和实例迁移见 DEPLOY.md。

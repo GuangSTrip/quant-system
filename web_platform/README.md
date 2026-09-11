@@ -4,6 +4,16 @@
 
 面向单账户美股／ETF的可交互课程平台。网页读取 Alpaca Paper 账户和 IEX 行情；服务器实际执行模拟订单、撤单、风控和对账。原 Python 多资产回测保留为独立研究基线。
 
+## 组员三步独立部署
+
+准备 Node.js 24、自己的 Cloudflare 账户和 Alpaca **Paper Key ID + Secret Key**。
+
+1. 获取仓库代码，进入 `web_platform`（本目录）。
+2. 执行 `npm ci`。
+3. 执行 `npm run deploy`，按提示登录云账户、输入自己的 Paper 凭证并保存生成的网站账号密码。
+
+向导创建独立数据库与公开 HTTPS 网站，自动检查登录和账户读取。完整前置条件、方案额度、更新、密码重置、失败恢复和验收说明见 **[DEPLOY.md](DEPLOY.md)**。每位组员独立部署，无需 OpenAI 账号；实际模拟成交仍需完成页面中的「交付验收」。
+
 ## 课堂操作
 
 1. 打开站点，点击「使用说明」查看完整流程。
@@ -68,7 +78,7 @@ npm run validate
 
 账户、时钟、持仓和订单同时“超时”的根因是 Workerd 不支持 `fetch` 的 `redirect: 'error'`；请求在网络发送前就抛异常。现已改为 `manual` 并显式拒绝全部 3xx，保留固定 Paper 主机。实际生产日志已记录六类 Alpaca 请求返回 HTTP 200。
 
-Node 40 项、原 Python 29 项全量测试通过；另在真实 Workerd 中验证 GET、POST、DELETE、404、重定向拒绝、脱敏及独立密码认证兼容性。Workerd 回归使用服务绑定替身，不发出外部订单。具备该运行时后执行：
+Node 47 项、原 Python 29 项全量测试通过；另在真实 Workerd 中验证 GET、POST、DELETE、404、重定向拒绝、脱敏及独立密码认证兼容性。Workerd 回归使用服务绑定替身，不发出外部订单。具备该运行时后执行：
 
 ```sh
 workerd test tests/workerd/transport.capnp
