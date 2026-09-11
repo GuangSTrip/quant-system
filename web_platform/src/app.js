@@ -21,7 +21,7 @@
   async function api(path,payload){
     let response;try{response=await fetch('/api/v1/'+path,{method:payload===undefined?'GET':'POST',credentials:'same-origin',cache:'no-store',headers:payload===undefined?{}:{'content-type':'application/json','x-quant-action':'1'},...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:AbortSignal.timeout(payload===undefined?20000:120000)});}catch{throw new Error(payload===undefined?'连接中断，请稍后刷新。':'请求结果尚未确认。请查询同一笔订单或执行对账，不要重复创建新订单。');}
     let data;try{data=await response.json();}catch{throw new Error('服务器返回了无法识别的结果，请刷新后查看订单状态。');}
-    if(!response.ok){const e=new Error(data.error||'请求失败');e.code=data.code;throw e;}return data;
+    if(!response.ok){if(response.status===401&&path!=='session'&&path!=='auth/login')await loadSession();const e=new Error(data.error||'请求失败');e.code=data.code;throw e;}return data;
   }
   function showView(view){
     if(!names[view])view='overview';
@@ -32,7 +32,7 @@
     if(view==='acceptance')loadAcceptanceHistory();
   }
   async function loadSession(){
-    try{state.session=await api('session');text('identity-label',state.session.operator?'操作员已登录':state.session.signed_in?'已登录 · 查看权限':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
+    try{state.session=await api('session');text('identity-label',state.session.operator?state.session.username+' · 操作员已登录':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
     catch(e){state.session=null;text('identity-label','身份服务暂不可用');message('global-error',e.message,true);$('operator-notice').hidden=false;}
     syncAccess();
   }
@@ -168,6 +168,10 @@
   document.querySelectorAll('[data-view],[data-go]').forEach(e=>e.addEventListener('click',()=>showView(e.dataset.view||e.dataset.go)));
   window.addEventListener('hashchange',()=>showView(location.hash.slice(1)));
   document.querySelectorAll('[data-close]').forEach(e=>e.addEventListener('click',()=>$(e.dataset.close).close()));
+  $('sign-in').addEventListener('click',()=>{message('login-error','');$('login-dialog').showModal();$('login-username').focus();});
+  $('login-dialog').addEventListener('close',()=>{$('login-password').value='';});
+  $('login-form').addEventListener('submit',e=>{e.preventDefault();busy($('login-submit'),async()=>{try{message('login-error','');await api('auth/login',{username:$('login-username').value.trim(),password:$('login-password').value});$('login-dialog').close();await loadSession();await refresh();if(location.hash==='#audit')await loadAudit();toast('登录成功，可以操作课程模拟账户。');}catch(error){message('login-error',error.message,true);}finally{$('login-password').value='';}});});
+  $('sign-out').addEventListener('click',()=>busy($('sign-out'),async()=>{try{await api('auth/logout',{});state.audit=[];$('audit-list').replaceChildren();$('confirm-dialog').close();$('action-dialog').close();await loadSession();toast('已退出登录，现在为访客查看模式。');}catch(error){toast(error.message);}}));
   $('open-help').addEventListener('click',()=>{$('help-dialog').showModal();$('help-title').focus();});
   $('refresh').addEventListener('click',refresh);$('equity-period').addEventListener('change',loadEquity);$('quote-form').addEventListener('submit',e=>{e.preventDefault();loadQuote();});
   $('quote-to-trade').addEventListener('click',()=>{const sym=$('quote-symbol').value;$('order-symbol').value=sym;if(state.quote?.symbol===sym){const s=state.quote.snapshot,p=Number(s.trade?.p)||Number(s.reference);if(p>0)$('order-form').elements.limit_price.value=p.toFixed(2);}showView('trade');});
@@ -189,7 +193,7 @@
   $('acceptance-submit').addEventListener('click',()=>busy($('acceptance-submit'),async()=>{try{await previewAcceptance();}catch(e){message('acceptance-message',e.message,true);}}));
   $('acceptance-cancel').addEventListener('click',()=>{const r=state.acceptance?.run;if(!r)return;if(state.pending){showConfirmation({...state.pending,recovery:true});return;}const allow=$('acceptance-queued').checked;if(!state.overview?.clock?.is_open&&!allow){message('acceptance-message','休市时请先勾选允许本次限价委托排队。',true);return;}askAction('确认独立撤单验证','将以 '+money(r.cancel_order.limit_price)+' 买入 1 股 '+r.symbol+'，随后立即申请撤销。这会实际向 Alpaca Paper 提交额外一笔订单；如果已成交，成交部分不能撤回。重复此步骤只查询／撤销同一个订单号。',()=>api('acceptance/cancel-check',{id:r.id,confirm:true,allow_queued:allow}));});
   $('acceptance-inspect').addEventListener('click',()=>busy($('acceptance-inspect'),inspectAcceptance));$('acceptance-export').addEventListener('click',exportAcceptance);$('acceptance-export-json').addEventListener('click',()=>{if(state.acceptance)download('paper-acceptance-'+state.acceptance.run.id+'.json',state.acceptance);});
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){loadSession();refresh();}});
   async function init(){
     syncAccess();updateOrderFields();showView(location.hash.slice(1));
     try{const pending=JSON.parse(sessionStorage.getItem('quant.pending.v1')||'null');if(pending?.client_id&&['orders','plans/submit','acceptance/submit'].includes(pending.path)&&pending.payload&&pending.order)state.pending=pending;}catch{}renderPending();

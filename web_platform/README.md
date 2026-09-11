@@ -7,7 +7,7 @@
 ## 课堂操作
 
 1. 打开站点，点击「使用说明」查看完整流程。
-2. 用站点所有者的 ChatGPT 账号登录。访客可查看，绑定操作员可修改。
+2. 点击「账号密码登录」，输入独立的课程账号和密码。无需 OpenAI 账号；访客可查看，课程操作员可修改。分享此账号的人操作同一个模拟账户。
 3. 在「风控与对账」检查限额，点击「对账后恢复模拟交易」，输入「恢复模拟盘」。首次部署默认暂停。
 4. 查看行情时间、市场时钟、账户与持仓。在「策略与回测」配置双均线、绝对动量或买入持有，运行真实 IEX 日线回测。
 5. 保存的报告可重新打开、导出；勾选数据快照可在同一输入上复现。报告可以生成有效期 5 分钟的目标仓位订单计划。
@@ -29,9 +29,11 @@ npm run validate
 
 构建用 esbuild 将 `src/server.mjs`、研究引擎和界面资源编为单个 Worker ES 模块，生成 `worker/index.js` 和 `dist/server/index.js`。只编辑 `src/`；不要手改生成文件。`drizzle/` 是生成并检查过的 schema-only SQL 迁移。部署平台负责创建 D1 `DB` 绑定并应用迁移，运行时不执行 DDL。改 schema 后运行 `npm run db:generate`，已部署迁移不得重写。
 
-服务端配置：`ALPACA_PAPER_API_KEY`、`ALPACA_PAPER_API_SECRET` 为站点秘密；`OPERATOR_EMAIL` 是首次绑定身份的所有者邮箱；`DB` 是平台提供的 D1 绑定。
+服务端配置：`ALPACA_PAPER_API_KEY`、`ALPACA_PAPER_API_SECRET` 为站点秘密；`AUTH_USERNAME` 为课程账号，`AUTH_PASSWORD_RECORD` 为密码校验记录秘密；`DB` 是平台提供的 D1 绑定。密码明文不写入源码、网页、日志或数据库。
 
-认证由 Sites 的 `/signin-with-chatgpt` 提供。Worker 只信任 Sites 注入的用户 ID／邮箱；首次授权操作绑定稳定的站点用户 ID。直接本地 HTTP 运行时这些头没有认证能力，不能把裸 Worker 测试服务器作为公开部署。
+认证由网站独立提供，接口为 `POST /api/v1/auth/login`、`POST /api/v1/auth/logout` 和 `GET /api/v1/session`。密码使用随机 32 字节盐、PBKDF2-SHA256 的 100,000 次迭代校验（已在 Workerd 验证）；32 字节随机会话令牌仅置于 Secure／HttpOnly／SameSite=Strict Cookie，D1 只保存令牌摘要。会话 8 小时过期，退出立即撤销当前会话，重新登录会轮换令牌。账号或密码校验记录更新后，旧会话全部失效。登录频率在数据库中限制为每来源每分钟 20 次、全站每分钟 100 次。所有修改请求仍需同源 JSON 与操作标记，OpenAI 身份头不再授予操作权限。
+
+公开访问不需要登录；没有开放注册、多用户隔离或找回密码。课程账号由站点管理员配置。原有 `control.owner_id` 仅保留历史数据，不参与新认证，也不改变已有订单、风控或审计记录。
 
 ## 已实现范围
 
@@ -66,10 +68,11 @@ npm run validate
 
 账户、时钟、持仓和订单同时“超时”的根因是 Workerd 不支持 `fetch` 的 `redirect: 'error'`；请求在网络发送前就抛异常。现已改为 `manual` 并显式拒绝全部 3xx，保留固定 Paper 主机。实际生产日志已记录六类 Alpaca 请求返回 HTTP 200。
 
-Node 35 项、原 Python 29 项全量测试通过；另在真实 Workerd 中验证 GET、POST、DELETE、404、重定向拒绝与脱敏。Workerd 回归使用服务绑定替身，不发出外部订单。具备该运行时后执行：
+Node 40 项、原 Python 29 项全量测试通过；另在真实 Workerd 中验证 GET、POST、DELETE、404、重定向拒绝、脱敏及独立密码认证兼容性。Workerd 回归使用服务绑定替身，不发出外部订单。具备该运行时后执行：
 
 ```sh
 workerd test tests/workerd/transport.capnp
+workerd test tests/workerd/auth.capnp
 ```
 
 验证运行时版本为 `1.20260515.1`。详细生产证据、实际成交验收状态和复现方式见 [ONLINE_VERIFICATION.md](ONLINE_VERIFICATION.md)。截至该记录，仅确认在线读取成功；实际成交须以「交付验收」保存的券商回报为准。

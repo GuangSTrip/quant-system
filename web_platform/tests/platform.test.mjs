@@ -6,14 +6,14 @@ import worker from '../worker/index.js';
 import {setup,orderInput} from './helpers.mjs';
 
 test('packaged interface, help and scripts are served independently of broker availability',async()=>{
-  for(const [path,type]of [['/','text/html'],['/styles.css','text/css'],['/app.js','text/javascript'],['/research-baseline.json','application/json']]){const r=await worker.fetch(new Request('https://quant.test'+path),{});assert.equal(r.status,200);assert.ok(r.headers.get('content-type').startsWith(type));if(path==='/app.js')new vm.Script(await r.text());if(path==='/'){const html=await r.text();assert.match(html,/id="help-dialog"/);assert.match(html,/id="confirm-dialog"/);assert.match(html,/target="_top"/);}}
+  for(const [path,type]of [['/','text/html'],['/styles.css','text/css'],['/app.js','text/javascript'],['/research-baseline.json','application/json']]){const r=await worker.fetch(new Request('https://quant.test'+path),{});assert.equal(r.status,200);assert.ok(r.headers.get('content-type').startsWith(type));if(path==='/app.js')new vm.Script(await r.text());if(path==='/'){const html=await r.text();assert.match(html,/id="help-dialog"/);assert.match(html,/id="confirm-dialog"/);assert.match(html,/id="login-dialog"/);assert.ok(!html.includes('/signin-with-chatgpt'));}}
   const source=readFileSync(new URL('../worker/index.js',import.meta.url),'utf8');assert.ok(!source.includes('https://api.alpaca.markets'));assert.ok(!source.includes('test-paper-secret'));
 });
-test('public readers can inspect live data, but writes require bound operator identity and origin',async t=>{
+test('public readers can inspect live data, but writes require an independent login session and origin',async t=>{
   const {request,broker}=setup(t);const overview=await request('/api/v1/overview',undefined,{auth:false});assert.equal(overview.status,200);assert.equal(overview.data.account.equity,'100000');assert.equal(overview.data.control.halted,true);assert.ok(!JSON.stringify(overview.data).includes('test-paper'));
-  for(const [opts,status]of [[{auth:false},401],[{email:'viewer@example.test'},403],[{headers:{origin:'https://evil.test'}},403],[{headers:{'x-quant-action':''}},403]])assert.equal((await request('/api/v1/orders',orderInput(),opts)).status,status);
+  for(const [opts,status]of [[{auth:false},401],[{auth:false,headers:{'oai-authenticated-user-id':'old-owner','oai-authenticated-user-email':'owner@example.test'}},401],[{headers:{origin:'https://evil.test'}},403],[{headers:{'x-quant-action':''}},403]])assert.equal((await request('/api/v1/orders',orderInput(),opts)).status,status);
   assert.equal((await request('/api/v1/audit',undefined,{auth:false})).status,401);assert.equal(broker.posts().length,0);
-  await request('/api/v1/reconcile',{});assert.equal((await request('/api/v1/control',{halted:true},{id:'another-site-id'})).status,403);
+  await request('/api/v1/reconcile',{});assert.equal((await request('/api/v1/control',{halted:true},{auth:false,headers:{'oai-authenticated-user-id':'old-owner'}})).status,401);
 });
 test('durable halt gates real submission; recovery requires reconciliation',async t=>{
   const {request,resume,broker}=setup(t);let r=await request('/api/v1/orders',orderInput());assert.equal(r.data.code,'HALTED');assert.equal(broker.posts().length,0);await resume();r=await request('/api/v1/orders',orderInput());assert.equal(r.data.order.status,'new');assert.equal(broker.posts().length,1);await request('/api/v1/control',{halted:true});r=await request('/api/v1/orders',orderInput());assert.equal(r.data.code,'HALTED');assert.equal(broker.posts().length,1);

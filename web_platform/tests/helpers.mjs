@@ -1,9 +1,9 @@
 import {DatabaseSync} from 'node:sqlite';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
 import worker from '../worker/index.js';
 
 export class D1 {
-  constructor(){this.sqlite=new DatabaseSync(':memory:');this.sqlite.exec(readFileSync(new URL('../drizzle/0000_perfect_kabuki.sql',import.meta.url),'utf8'));this.fail=null;}
+  constructor(){this.sqlite=new DatabaseSync(':memory:');for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())this.sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));this.fail=null;}
   withSession(){return this;}
   prepare(sql){const self=this;return {sql,values:[],bind(...values){this.values=values;return this;},run(){if(self.fail?.(sql))throw Error('injected storage failure');const x=self.sqlite.prepare(sql).run(...this.values);return {success:true,meta:{changes:Number(x.changes)}};},first(){if(self.fail?.(sql))throw Error('injected storage failure');return self.sqlite.prepare(sql).get(...this.values)||null;},all(){if(self.fail?.(sql))throw Error('injected storage failure');return {results:self.sqlite.prepare(sql).all(...this.values)};}};}
   async batch(statements){this.sqlite.exec('BEGIN IMMEDIATE');try{const out=statements.map(s=>s.run());this.sqlite.exec('COMMIT');return out;}catch(e){this.sqlite.exec('ROLLBACK');throw e;}}
@@ -13,6 +13,8 @@ export class D1 {
 }
 export function bars(count=180){const end=new Date();end.setUTCHours(4,0,0,0);end.setUTCDate(end.getUTCDate()-1);return Array.from({length:count},(_,i)=>{const c=100+i*.5+Math.sin(i/7)*2;return {t:new Date(end.getTime()-(count-1-i)*86400000).toISOString(),o:c-.2,c,h:c+1,l:c-1,v:50000};});}
 export const orderInput=(extra={})=>({symbol:'SPY',side:'buy',type:'limit',qty:1,limit_price:100,time_in_force:'day',confirm:true,idempotency_key:crypto.randomUUID(),...extra});
+export const TEST_LOGIN={username:'course_test',password:'fixture-only-password-123'};
+const TEST_PASSWORD_RECORD='{"version":1,"iterations":100000,"salt":"bTVAWrQmnE4kq5ANnxB6ZVqnqbVv9qYHSItIxnUBT-U","hash":"Sh3y0ydmvh_wqBu9E0i1thcyJ3k2uBNTOQ_QOfW8L2A"}';
 export class Broker {
   constructor(){
     this.calls=[];this.orders=new Map();this.account={status:'ACTIVE',equity:'100000',last_equity:'100000',cash:'100000',buying_power:'200000',long_market_value:'0',short_market_value:'0',trading_blocked:false,account_blocked:false};
@@ -43,9 +45,14 @@ export class Broker {
 export function setup(t){
   const db=new D1(),broker=new Broker(),real=globalThis.fetch;
   globalThis.fetch=broker.fetch.bind(broker);
-  const env={DB:db,ALPACA_PAPER_API_KEY:'test-paper-key',ALPACA_PAPER_API_SECRET:'test-paper-secret',OPERATOR_EMAIL:'owner@example.test'};
+  const env={DB:db,ALPACA_PAPER_API_KEY:'test-paper-key',ALPACA_PAPER_API_SECRET:'test-paper-secret',AUTH_USERNAME:TEST_LOGIN.username,AUTH_PASSWORD_RECORD:TEST_PASSWORD_RECORD};
   t.after(()=>{globalThis.fetch=real;db.close();});
-  async function request(path,payload,opts={}){const method=payload===undefined?'GET':'POST';const headers={'content-type':'application/json',origin:'https://quant.test','x-quant-action':'1',...(opts.auth===false?{}:{'oai-authenticated-user-id':opts.id||'site-user-1','oai-authenticated-user-email':opts.email||'owner@example.test'}),...opts.headers};const r=await worker.fetch(new Request('https://quant.test'+path,{method,headers,...(payload===undefined?{}:{body:JSON.stringify(payload)})}),opts.env||env);return {status:r.status,data:await r.json(),response:r};}
+  let sessionCookie=null;
+  async function request(path,payload,opts={}){
+    if(opts.auth!==false&&!path.startsWith('/api/v1/auth/')&&!sessionCookie){const session=await request('/api/v1/auth/login',TEST_LOGIN,{auth:false});if(session.status!==200)throw Error('Fixture login failed: '+JSON.stringify(session.data));sessionCookie=session.response.headers.get('set-cookie').split(';')[0];}
+    const method=payload===undefined?'GET':'POST',headers={'content-type':'application/json',origin:'https://quant.test','x-quant-action':'1',...(opts.auth===false?{}:{cookie:sessionCookie}),...opts.headers};
+    const r=await worker.fetch(new Request('https://quant.test'+path,{method,headers,...(payload===undefined?{}:{body:JSON.stringify(payload)})}),opts.env||env);return {status:r.status,data:await r.json(),response:r};
+  }
   async function resume(){const r=await request('/api/v1/control',{halted:false,confirm:'恢复模拟盘'});if(r.status!==200)throw Error(JSON.stringify(r.data));return r;}
   return {db,broker,env,request,resume};
 }

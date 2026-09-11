@@ -24,3 +24,11 @@ export const artifacts=sqliteTable('artifacts',{
   id:text('id').primaryKey(),kind:text('kind').notNull(),name:text('name').notNull(),
   payload:text('payload').notNull(),actor:text('actor').notNull(),createdAt:text('created_at').notNull()
 },t=>[index('idx_artifacts_kind_created').on(t.kind,t.createdAt)]);
+
+export const authSessions=sqliteTable('auth_sessions',{
+  tokenHash:text('token_hash').primaryKey(),username:text('username').notNull(),credentialTag:text('credential_tag').notNull(),
+  createdAt:text('created_at').notNull(),expiresAt:integer('expires_at').notNull()
+},t=>[index('idx_auth_sessions_expiry').on(t.expiresAt)]);
+export const authLimits=sqliteTable('auth_limits',{
+  bucket:text('bucket').primaryKey(),attempts:integer('attempts').notNull(),expiresAt:integer('expires_at').notNull()
+});

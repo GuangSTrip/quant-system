@@ -1,10 +1,11 @@
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,strategyConfig,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
 import {PAGE,CSS,CLIENT,FROZEN} from './assets.mjs';
 import {broker} from './transport.mjs';
+import {identity,login,logout} from './auth.mjs';
 
 const TERMINAL=['filled','canceled','expired','rejected','replaced'];
 const UNCERTAIN=['submitting','unknown'];
-const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'private, no-store','x-content-type-options':'nosniff'}});
+const json=(value,status=200,headers={})=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'private, no-store','x-content-type-options':'nosniff',...headers}});
 function database(env){requireValue(env.DB,'持久化服务未就绪，交易已阻断',503,'STORAGE_UNAVAILABLE');return env.DB.withSession?env.DB.withSession('first-primary'):env.DB;}
 async function first(db,sql,...values){return db.prepare(sql).bind(...values).first();}
 async function all(db,sql,...values){return (await db.prepare(sql).bind(...values).all()).results;}
@@ -19,17 +20,9 @@ async function auditStatement(db,actor,kind,subject,details){
   return db.prepare('INSERT INTO events (timestamp,actor,kind,subject,details,digest) VALUES (?,?,?,?,?,?)').bind(event.timestamp,actor,kind,event.subject,JSON.stringify(details),await digest(event));
 }
 async function audit(db,actor,kind,subject,details){return (await auditStatement(db,actor,kind,subject,details)).run();}
-function identity(request,env){
-  const id=request.headers.get('oai-authenticated-user-id'),email=request.headers.get('oai-authenticated-user-email');
-  const allowed=email&&id&&String(env.OPERATOR_EMAIL||'').trim().toLowerCase()===email.trim().toLowerCase();
-  return {id,email,signed_in:Boolean(id&&email),operator:Boolean(allowed)};
-}
 async function operator(request,env,db){
-  const user=identity(request,env);requireValue(user.signed_in,'请先使用 ChatGPT 登录',401,'SIGN_IN_REQUIRED');
+  const user=await identity(request,env,db);requireValue(user.signed_in,'请先使用网站账号和密码登录',401,'SIGN_IN_REQUIRED');
   requireValue(user.operator,'当前账号只有查看权限',403,'FORBIDDEN');
-  const c=await control(db);
-  if(!c.owner_id)await run(db,'UPDATE control SET owner_id=? WHERE id=1 AND owner_id IS NULL',user.id);
-  requireValue((await control(db)).owner_id===user.id,'当前身份与已绑定操作员不一致',403,'FORBIDDEN');
   return user;
 }
 async function body(request){
@@ -283,7 +276,7 @@ async function route(request,env){
   requireValue(method==='GET'||method==='POST','Method not allowed',405);
   const db=database(env);
   if(method==='GET'){
-    if(path==='/api/v1/session'){const u=identity(request,env),c=await control(db);return json({ok:true,signed_in:u.signed_in,operator:u.operator&&(!c.owner_id||u.id===c.owner_id),email:u.email,sign_in:'/signin-with-chatgpt?return_to=%2F',sign_out:'/signout-with-chatgpt?return_to=%2F'});}
+    if(path==='/api/v1/session'){const u=await identity(request,env,db);return json({ok:true,signed_in:u.signed_in,operator:u.operator,username:u.username,expires_at:u.expires_at,auth_mode:'password',login_enabled:Boolean(env.AUTH_USERNAME&&env.AUTH_PASSWORD_RECORD)});}
     if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
     if(path==='/api/v1/equity'){const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
     if(path==='/api/v1/market'){const sym=symbol(url.searchParams.get('symbol'));return json({ok:true,symbol:sym,source:'Alpaca IEX',fetched_at:nowISO(),snapshot:await snapshotQuote(env,sym)});}
@@ -298,7 +291,10 @@ async function route(request,env){
     }
     throw new AppError('接口不存在',404,'NOT_FOUND');
   }
-  const input=await body(request),user=await operator(request,env,db);
+  const input=await body(request);
+  if(path==='/api/v1/auth/login'){const result=await login(request,env,db,input,auditStatement);return json(result.body,200,result.headers);}
+  if(path==='/api/v1/auth/logout'){const result=await logout(request,env,db,auditStatement);return json(result.body,200,result.headers);}
+  const user=await operator(request,env,db);
   if(path==='/api/v1/acceptance/prepare')return json(await prepareAcceptance(env,db,user,input));
   if(path==='/api/v1/acceptance/inspect')return json(await inspectAcceptance(env,db,user,input.id));
   if(path==='/api/v1/acceptance/submit'){
