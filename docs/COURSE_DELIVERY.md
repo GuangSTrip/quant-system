@@ -7,8 +7,8 @@
 - [公开网站](https://quant-system-course-dashboard.able-stork-1502.chatgpt.site)：使用已有独立网站账号密码操作，无需 OpenAI 账号。访客只读，课程账号共享一个模拟账户。
 - [源码](https://github.com/GuangSTrip/quant-system)：平台位于 `web_platform/`，Python 研究位于 `quant_system/`；仓库保持私有，组员需要读取权限。
 - [三步部署](../web_platform/DEPLOY.md)：获取代码进入 `web_platform` → `npm ci` → `npm run deploy`。准备 Node.js 24、自己的 Cloudflare 账户和 Paper Key ID／Secret Key。
-- 当前已核实在线版本：Sites **10**，源提交 `0406902b896803ad577c022b26be9eecc97203ca`。后台自动策略已上线。
-- 本次 GitHub 更新补充“故障暂停写入失败时保留恢复租约”的保护和回归测试。此补丁尚未部署到网站：当前工作环境连接失败，无法推送 Sites 源码和构建新版。GitHub 更新不等于网站同步成功。
+- 当前已核实在线版本：Sites **11**，源提交 `9fad22e1d1e47413c04d5de0bb7dd7322c4cc4ef`，2026-09-12 10:23:28 UTC 发布成功。后台自动策略及恢复保护均已上线。
+- “故障暂停写入失败时保留恢复租约”的保护及回归测试已在 GitHub 与线上同步。发布前逐文件核对平台源码，业务文件与 GitHub `dcbbce1b062d08184b9d75cb8b91fa1497224a9d` 一致；仅 `.gitignore` 对生成包的跟踪策略因两个仓库用途不同而保留差异。
 
 ## 核心能力
 
@@ -43,7 +43,8 @@
 | 初始在线任务 | 2026-09-12 03:22:47 UTC，GitHub push 任务调用在线调度 HTTP 200，返回 paused |
 | 实际定时触发 | 2026-09-12 08:40:04.998 UTC，生产日志 scheduler_tick，source=github、ok=true、outcome=paused |
 | 实际自动成交 | 尚无本次在线账户自动订单成交回报，不能声明已通过 |
-| 本次提交验证 | 新增 Course delivery checks，每次提交运行 Python／Node 全量测试、构建、产物及 Workerd 兼容性校验；结果以对应 Actions 为准 |
+| 本次提交验证 | [Course delivery checks](https://github.com/GuangSTrip/quant-system/actions/runs/34685497026) 已通过：73 项 Node、29 项 Python、构建、产物及 Workerd 兼容性校验；本次发布前另重跑 73 项 Node 全部通过 |
+| 本次网站发布 | Sites 11 部署状态 succeeded，环境配置沿用 revision 4；没有重置密码、券商凭据、数据库或交易状态 |
 
 [初始调度运行](https://github.com/GuangSTrip/quant-system/actions/runs/34670196922)；
 [实际 schedule 运行](https://github.com/GuangSTrip/quant-system/actions/runs/34683847749)；
@@ -55,4 +56,4 @@
 
 维护者先查看当前提交 CI，再按三步部署在自己的账户验证。部署保留独立网站与数据库状态，迁移只应用新增 SQL；恢复保护不需要新迁移。首次部署默认暂停，心跳不会自动授权交易。
 
-原在线站点尚待同步本次恢复补丁；需恢复开发工作环境后构建、测试、推送 Sites 源码并发布，核对实际版本。最终汇报若要声称“在线自动成交验收通过”，还需在常规开市时保存真实自动委托与成交回报；市场休市时可展示真实后台等待流程。
+开发环境连接故障已恢复，恢复补丁已构建、测试、推送并成功发布到原公开网址，网站与 GitHub 业务源码已同步。当前可以交付单账户日频自动量化 Paper 系统的代码、网站及部署说明。最终汇报若要声称“在线自动成交验收通过”，仍需在常规开市时保存真实自动委托与成交回报；市场休市时可展示真实后台等待流程。
