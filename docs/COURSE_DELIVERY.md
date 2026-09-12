@@ -7,7 +7,7 @@
 - [公开网站](https://quant-system-course-dashboard.able-stork-1502.chatgpt.site)：使用已有独立网站账号密码操作，无需 OpenAI 账号。访客只读，课程账号共享一个模拟账户。
 - [源码](https://github.com/GuangSTrip/quant-system)：平台位于 `web_platform/`，Python 研究位于 `quant_system/`；仓库保持私有，组员需要读取权限。
 - [三步部署](../web_platform/DEPLOY.md)：获取代码进入 `web_platform` → `npm ci` → `npm run deploy`。准备 Node.js 24、自己的 Cloudflare 账户和 Paper Key ID／Secret Key。
-- 当前已核实在线版本：Sites **11**，源提交 `9fad22e1d1e47413c04d5de0bb7dd7322c4cc4ef`，2026-09-12 10:23:28 UTC 发布成功。后台自动策略及恢复保护均已上线。
+- 当前已核实在线版本：Sites **12**，源提交 `d4ba5979035857ec4dfd56e0296efcd1e2aa85c4`，2026-09-12 10:52:30 UTC 发布成功。新增策略图解与交互式课程展示，后台自动策略及恢复保护保留。
 - “故障暂停写入失败时保留恢复租约”的保护及回归测试已在 GitHub 与线上同步。发布前逐文件核对平台源码，业务文件与 GitHub `dcbbce1b062d08184b9d75cb8b91fa1497224a9d` 一致；仅 `.gitignore` 对生成包的跟踪策略因两个仓库用途不同而保留差异。
 
 ## 核心能力
@@ -57,3 +57,7 @@
 维护者先查看当前提交 CI，再按三步部署在自己的账户验证。部署保留独立网站与数据库状态，迁移只应用新增 SQL；恢复保护不需要新迁移。首次部署默认暂停，心跳不会自动授权交易。
 
 开发环境连接故障已恢复，恢复补丁已构建、测试、推送并成功发布到原公开网址，网站与 GitHub 业务源码已同步。当前可以交付单账户日频自动量化 Paper 系统的代码、网站及部署说明。最终汇报若要声称“在线自动成交验收通过”，仍需在常规开市时保存真实自动委托与成交回报；市场休市时可展示真实后台等待流程。
+
+## 交互式策略展示 · 2026-09-12
+
+左侧「策略讲解」支持规则说明、价格／指标／成交图、逐日信号解释、调参即时重算、收益与回撤、动态讲稿下载。教学数据明确标识，真实快照保存后可带入自动策略配置，不能从教学数据或未保存参数直接启动。业务源码已同步至 GitHub `52c22d558e343d0cf8fca41679a987339f488dc8`。[当前 CI](https://github.com/GuangSTrip/quant-system/actions/runs/34689560051) 成功，76 项 Node 测试通过；构建和完整研究检查通过。逐步操作见 [展示说明](../web_platform/STRATEGY_PRESENTATION.md)。此前表格保留恢复补丁发布时的证据。
