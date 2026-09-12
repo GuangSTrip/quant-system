@@ -35,7 +35,7 @@ export class Broker {
     if(u.pathname==='/v2/clock')return response(this.clock);
     if(u.pathname==='/v2/positions')return response(this.positions);
     if(u.pathname==='/v2/orders')return response([...this.orders.values()].filter(o=>u.searchParams.get('status')!=='open'||!['filled','canceled','expired','rejected'].includes(o.status)));
-    if(u.pathname.startsWith('/v2/assets/'))return response({tradable:true,status:'active',asset_class:'us_equity'});
+    if(u.pathname.startsWith('/v2/assets/'))return response({id:'fixture-asset-id',symbol:decodeURIComponent(u.pathname.split('/').pop()),tradable:true,status:'active',class:'us_equity'});
     if(u.pathname.endsWith('/snapshot'))return response(this.quote);
     if(u.pathname==='/v2/stocks/bars')return response({bars:{[u.searchParams.get('symbols')]:this.historical},next_page_token:null});
     if(u.pathname==='/v2/account/portfolio/history')return response({timestamp:[1700000000,1700086400],equity:[100000,100050]});

@@ -44,6 +44,16 @@ async function snapshotQuote(env,sym){
   const s=await broker(env,'/v2/stocks/'+encodeURIComponent(sym)+'/snapshot?feed=iex',{data:true});
   return {...s.latestQuote,reference:Number(s.dailyBar?.c||s.prevDailyBar?.c||s.latestTrade?.p),reference_at:s.dailyBar?.t||s.prevDailyBar?.t||s.latestTrade?.t,trade:s.latestTrade,day:s.dailyBar,previous:s.prevDailyBar};
 }
+async function requireCourseAsset(env,sym){
+  const asset=await broker(env,'/v2/assets/'+encodeURIComponent(sym),{allow404:true});
+  requireValue(asset,`${sym}：券商未找到该证券，请检查交易代码`,409,'ASSET_NOT_FOUND');
+  // Raw Trading API JSON uses "class"; "asset_class" is the Python SDK model name.
+  requireValue(typeof asset.class==='string'&&typeof asset.status==='string'&&typeof asset.tradable==='boolean',`${sym}：券商证券资料不完整，暂时无法确认可交易性，请稍后重试`,502,'ASSET_DATA_UNAVAILABLE');
+  requireValue(asset.class==='us_equity',`${sym}：当前课程平台仅支持美股和美股 ETF，不支持该证券类别`,409,'ASSET_CLASS_UNSUPPORTED');
+  requireValue(asset.status==='active',`${sym}：券商将该证券标记为非活跃状态，暂不能提交订单`,409,'ASSET_INACTIVE');
+  requireValue(asset.tradable===true,`${sym}：券商当前不允许交易该证券，请选择其他课程标的`,409,'ASSET_NOT_TRADABLE');
+  return asset;
+}
 async function contextForOrder(env,db,o){
   const [ctx,quote,c]=await Promise.all([accountContext(env),snapshotQuote(env,o.symbol),control(db)]);
   const day=String(ctx.clock.timestamp).slice(0,10);
@@ -94,8 +104,7 @@ async function submitOrder(env,db,user,input,plan=null){
       if(e.code==='DAILY_LOSS')await run(db,'UPDATE control SET halted=1,reason=?,revision=revision+1,updated_at=? WHERE id=1','达到当日亏损限额',nowISO());
       await audit(db,user.id,'risk_rejected',clientId,{code:e.code,message:e.message,symbol:order.symbol});throw e;
     }
-    const asset=await broker(env,'/v2/assets/'+encodeURIComponent(order.symbol));
-    requireValue(asset.tradable&&asset.status==='active'&&asset.asset_class==='us_equity','标的不可交易或不属于课程证券范围',409,'ASSET_NOT_TRADABLE');
+    await requireCourseAsset(env,order.symbol);
     const timestamp=nowISO();
     await db.batch([
       db.prepare('INSERT INTO orders (client_id,request_hash,payload,status,estimated_notional,actor,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(clientId,hash,JSON.stringify(order),'submitting',check.notional,user.id,timestamp,timestamp),
@@ -314,7 +323,9 @@ async function route(request,env){
     return json({...canceled,order:submitted.order});
   }
   if(path==='/api/v1/orders/preview'){
-    const o=normalizeOrder(input),ctx=await contextForOrder(env,db,o),check=riskCheck(o,ctx);return json({ok:true,order:o,...check});
+    const o=normalizeOrder(input),ctx=await contextForOrder(env,db,o),check=riskCheck(o,ctx);
+    await requireCourseAsset(env,o.symbol);
+    return json({ok:true,order:o,...check});
   }
   if(path==='/api/v1/orders')return json(await submitOrder(env,db,user,input));
   if(path==='/api/v1/orders/cancel'){requireValue(typeof input.client_id==='string'&&/^qs_[a-f0-9]{32}$/.test(input.client_id),'缺少有效的平台订单号');return json(await cancelOrders(env,db,user,input.client_id));}
