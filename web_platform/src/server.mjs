@@ -2,6 +2,8 @@ import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,strategyConfi
 import {PAGE,CSS,CLIENT,FROZEN} from './assets.mjs';
 import {broker} from './transport.mjs';
 import {identity,login,logout} from './auth.mjs';
+import {createAutomation,autoGuard} from './automation.mjs';
+import {verifyScheduler} from './scheduler-auth.mjs';
 
 const TERMINAL=['filled','canceled','expired','rejected','replaced'];
 const UNCERTAIN=['submitting','unknown'];
@@ -81,7 +83,7 @@ async function reconcileOne(env,db,row,actor){
   if(existing)return saveBrokerOrder(db,row,existing,actor,'reconcile_order');
   return null;
 }
-async function submitOrder(env,db,user,input,plan=null){
+async function submitOrder(env,db,user,input,plan=null,automation=null){
   requireValue(input.confirm===true,'请在网页订单摘要中确认提交');
   requireValue(typeof input.idempotency_key==='string'&&/^[a-f0-9-]{36}$/.test(input.idempotency_key),'缺少有效幂等键');
   const order=normalizeOrder(input),hash=await digest({...order,allow_queued:input.allow_queued===true}),clientId='qs_'+input.idempotency_key.replaceAll('-','');
@@ -93,6 +95,7 @@ async function submitOrder(env,db,user,input,plan=null){
       if(!TERMINAL.includes(row.status)){const found=await reconcileOne(env,db,row,user.id);if(found)return {ok:found.status!=='rejected',reused:true,order:found};}
       return {ok:!UNCERTAIN.includes(row.status)&&row.status!=='rejected',reused:true,order:row.broker_data?JSON.parse(row.broker_data):{client_order_id:row.client_id,status:row.status},message:row.error||'该订单已处理，不会重复提交'};
     }
+    await autoGuard(db,order,automation);
     if(plan)requireValue(Date.now()<=Date.parse(plan.expires_at),'订单计划已过期，请重新生成',409,'PLAN_EXPIRED');
     const uncertain=await first(db,"SELECT client_id FROM orders WHERE status IN ('submitting','unknown') LIMIT 1");
     requireValue(!uncertain,'存在状态未知的订单，必须先对账',409,'UNRESOLVED_ORDER');
@@ -113,6 +116,7 @@ async function submitOrder(env,db,user,input,plan=null){
     row=await first(db,'SELECT * FROM orders WHERE client_id=?',clientId);
     const latest=await control(db);
     if(latest.halted){await run(db,"UPDATE orders SET status='rejected',error=?,updated_at=? WHERE client_id=?",'暂停发生在发送前',nowISO(),clientId);throw new AppError('服务器已暂停，此订单未发送',409,'HALTED');}
+    try{await autoGuard(db,order,automation);}catch(e){await run(db,"UPDATE orders SET status='rejected',error=?,updated_at=? WHERE client_id=?",e.message,nowISO(),clientId);throw e;}
     let placed;
     try{placed=await broker(env,'/v2/orders',{method:'POST',payload:{...order,client_order_id:clientId}});}
     catch(e){
@@ -129,7 +133,8 @@ async function submitOrder(env,db,user,input,plan=null){
       }
     }
     const result=await saveBrokerOrder(db,row,placed,user.id,'order_submitted');
-    if((await control(db)).halted&&!TERMINAL.includes(placed.status)){
+    const stopped=(await control(db)).halted || Boolean(automation && await autoGuard(db,order,automation).then(()=>false,()=>true));
+    if(stopped&&!TERMINAL.includes(placed.status)){
       try{await broker(env,'/v2/orders/'+encodeURIComponent(placed.id),{method:'DELETE'});await audit(db,user.id,'halt_cancel_requested',clientId,{broker_id:placed.id});}catch{await audit(db,user.id,'halt_cancel_uncertain',clientId,{broker_id:placed.id});}
     }
     return {ok:true,order:result,risk:check};
@@ -170,6 +175,7 @@ async function reconcile(env,db,user){
 async function setHalt(env,db,user,input){
   requireValue(typeof input.halted==='boolean','暂停状态无效');
   if(input.halted){
+    await auto.pause(db,user,'全局交易已暂停');
     await db.batch([db.prepare('UPDATE control SET halted=1,reason=?,revision=revision+1,updated_at=? WHERE id=1').bind('操作员暂停',nowISO()),await auditStatement(db,user.id,'halt',null,{cancel_requested:input.cancel===true})]);
     const canceled=input.cancel?await cancelOrders(env,db,user):null;
     return {ok:true,control:publicControl(await control(db)),canceled};
@@ -284,7 +290,9 @@ async function route(request,env){
   }
   requireValue(method==='GET'||method==='POST','Method not allowed',405);
   const db=database(env);
+  if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);await verifyScheduler(request,env);const result=await auto.tick(env,db,'github');console.info(JSON.stringify({event:'scheduler_tick',source:'github',at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
   if(method==='GET'){
+    if(path==='/api/v1/automation'){await operator(request,env,db);return json(await auto.status(db,env));}
     if(path==='/api/v1/session'){const u=await identity(request,env,db);return json({ok:true,signed_in:u.signed_in,operator:u.operator,username:u.username,expires_at:u.expires_at,auth_mode:'password',login_enabled:Boolean(env.AUTH_USERNAME&&env.AUTH_PASSWORD_RECORD)});}
     if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
     if(path==='/api/v1/equity'){const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
@@ -304,6 +312,10 @@ async function route(request,env){
   if(path==='/api/v1/auth/login'){const result=await login(request,env,db,input,auditStatement);return json(result.body,200,result.headers);}
   if(path==='/api/v1/auth/logout'){const result=await logout(request,env,db,auditStatement);return json(result.body,200,result.headers);}
   const user=await operator(request,env,db);
+  if(path==='/api/v1/automation/start')return json(await auto.configure(env,db,user,input));
+  if(path==='/api/v1/automation/resume')return json(await auto.resume(env,db,user,input));
+  if(path==='/api/v1/automation/pause'){if(input.cancel)return json(await auto.cancelRun(env,db,user));await auto.pause(db,user);return json(await auto.status(db,env));}
+  if(path==='/api/v1/automation/tick')return json(await auto.tick(env,db,'manual'));
   if(path==='/api/v1/acceptance/prepare')return json(await prepareAcceptance(env,db,user,input));
   if(path==='/api/v1/acceptance/inspect')return json(await inspectAcceptance(env,db,user,input.id));
   if(path==='/api/v1/acceptance/submit'){
@@ -324,6 +336,7 @@ async function route(request,env){
   }
   if(path==='/api/v1/orders/preview'){
     const o=normalizeOrder(input),ctx=await contextForOrder(env,db,o),check=riskCheck(o,ctx);
+    await autoGuard(db,o,null);
     await requireCourseAsset(env,o.symbol);
     return json({ok:true,order:o,...check});
   }
@@ -346,4 +359,5 @@ async function route(request,env){
   }
   throw new AppError('接口不存在',404,'NOT_FOUND');
 }
-export default {async fetch(request,env){const requestId=crypto.randomUUID();try{const response=await route(request,env);response.headers.set('x-request-id',requestId);return response;}catch(error){const known=error instanceof AppError;const response=json({ok:false,error:known?error.message:'服务暂时不可用，新增交易已阻断；请稍后重试。',code:known?error.code:'SERVICE_UNAVAILABLE',request_id:requestId},known?error.status:503);response.headers.set('x-request-id',requestId);if(!known)console.error('request_failed',requestId,error?.name||'Error');return response;}}};
+const auto=createAutomation({accountContext,history,snapshotQuote,requireCourseAsset,submitOrder,reconcile,audit,auditStatement,artifact,control,cancelOrders,acquire,release,saveArtifact});
+export default {async scheduled(event,env){requireValue(env.SCHEDULER_NATIVE==='true','原生调度未启用',503);return auto.tick(env,database(env),'cloudflare');},async fetch(request,env){const requestId=crypto.randomUUID();try{const response=await route(request,env);response.headers.set('x-request-id',requestId);return response;}catch(error){const known=error instanceof AppError;const response=json({ok:false,error:known?error.message:'服务暂时不可用，新增交易已阻断；请稍后重试。',code:known?error.code:'SERVICE_UNAVAILABLE',request_id:requestId},known?error.status:503);response.headers.set('x-request-id',requestId);if(!known)console.error('request_failed',requestId,error?.name||'Error');return response;}}};

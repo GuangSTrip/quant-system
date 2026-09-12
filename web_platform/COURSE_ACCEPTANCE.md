@@ -52,3 +52,8 @@
 六张 D1 表：`control` 保存开关、限额和租约；`orders` 保存意图与券商关联；`artifacts` 保存数据／策略／回测／计划／验收基准与检查报告；`events` 保存追加式审计；`auth_sessions` 保存会话摘要及过期时间；`auth_limits` 保存登录限流计数。迁移与源码存档，凭据只在站点服务端运行时配置。
 
 独立登录接口：同源 POST `auth/login` 接收账号密码，成功后由服务端设置 8 小时会话 Cookie；POST `auth/logout` 撤销当前会话；GET `session` 返回当前登录状态，不返回令牌或密码。持有课程账号的人共享同一个 Paper 账户，公开访客只能查看。
+
+
+## 2026-09-12 后台自动策略
+
+已增加授权后的预置日频策略后台执行、心跳、暂停恢复、运行记录和导出。现有 Sites 由 GitHub OIDC 定时任务驱动；独立部署自动配置 Cloudflare Cron。详见 [AUTOMATION.md](AUTOMATION.md)。此前“不提供后台自动交易”的描述由本节更新；高频、多租户、任意代码与真实资金仍不在范围内。

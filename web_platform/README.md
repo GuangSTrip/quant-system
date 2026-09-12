@@ -93,3 +93,8 @@ workerd test tests/workerd/auth.capnp
 - [按 client order ID 查询](https://docs.alpaca.markets/us/reference/getorderbyclientorderid)
 - [历史股票日线](https://docs.alpaca.markets/us/reference/stockbars)
 - [账户净值历史](https://docs.alpaca.markets/us/reference/getaccountportfoliohistory-1)
+
+
+## 2026-09-12 后台自动策略
+
+已增加授权后的预置日频策略后台执行、心跳、暂停恢复、运行记录和导出。现有 Sites 由 GitHub OIDC 定时任务驱动；独立部署自动配置 Cloudflare Cron。详见 [AUTOMATION.md](AUTOMATION.md)。此前“不提供后台自动交易”的描述由本节更新；高频、多租户、任意代码与真实资金仍不在范围内。

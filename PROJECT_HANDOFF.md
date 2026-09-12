@@ -67,3 +67,8 @@ kill switch；固定监听本机地址，不读取凭据，且没有订单提交
 `web_platform/DEPLOY.md` 是组员部署入口：获取代码进入目录、`npm ci`、`npm run deploy`。Node 构建不再依赖 Bash。锁定 Wrangler 4.131.0 的向导负责 Cloudflare OAuth、账户选择、独立 D1、迁移、Paper 凭证预检、密码生成、秘密上传、公开部署和在线读／认证检查；提供更新保留数据、单独在线复查、密码重置与本地 dry-run。独立部署不复用原 Sites 项目身份。
 
 验证：47 项 Node、29 项 Python，通过 Wrangler 实际 dry-run、两份 SQL 本地 D1 迁移和 workerd 2026-09-10 传输／认证回归。尚无组员 Cloudflare 账户的远端首部署证据，实际券商成交也仍待页面验收，不能将本地验证记作远端成交。详细前置条件、Workers CPU 额度、失败恢复和实例迁移见 DEPLOY.md。
+
+
+## 2026-09-12 自动策略交付
+
+新增持久化后台执行器、3 张增量迁移表、GitHub OIDC 调度接口、Cloudflare scheduled handler、网页自动策略控制和运行证据导出。使用既有 Paper 订单风控与幂等引擎；启动需登录授权与新鲜调度心跳；首次所选标的空仓；同日决策不重复提交；暂停、未知订单、对账与仓位偏差均有明确处理。运行与限制详见 web_platform/AUTOMATION.md；不能把替身成交当作在线成交。

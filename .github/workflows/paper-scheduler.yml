@@ -1,0 +1,43 @@
+name: Paper strategy scheduler
+on:
+  schedule:
+    - cron: '3,13,23,33,43,53 13-21 * * 1-5'
+    - cron: '17 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/paper-scheduler.yml']
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: paper-strategy-scheduler
+  cancel-in-progress: false
+jobs:
+  tick:
+    if: github.repository_id == '1363796451'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Authenticate scheduler and execute authorized Paper strategy
+        env:
+          SITE_ORIGIN: https://quant-system-course-dashboard.able-stork-1502.chatgpt.site
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import {appendFileSync} from 'node:fs';
+          const origin=process.env.SITE_ORIGIN;
+          const requestURL=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+          requestURL.searchParams.set('audience',origin);
+          const identity=await fetch(requestURL,{headers:{Authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN},redirect:'manual',signal:AbortSignal.timeout(15000)});
+          if(!identity.ok)throw Error('Scheduler identity request failed: '+identity.status);
+          const {value}=await identity.json();
+          if(!value)throw Error('Scheduler identity missing');
+          const response=await fetch(origin+'/api/v1/scheduler/tick',{method:'POST',headers:{Authorization:'Bearer '+value,'Content-Type':'application/json'},body:'{}',redirect:'manual',signal:AbortSignal.timeout(170000)});
+          if(!response.ok)throw Error('Platform scheduler request failed: '+response.status);
+          const result=await response.json();
+          const summary={checked_at:new Date().toISOString(),ok:result.ok,outcome:result.outcome,message:result.message||null};
+          console.log(JSON.stringify(summary));
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,'Paper scheduler result:\n\n```json\n'+JSON.stringify(summary,null,2)+'\n```\n');
+          if(!result.ok)throw Error('Strategy paused after a runtime fault. Inspect the platform run log.');
+          JS

@@ -81,3 +81,8 @@ Wrangler 使用官方 OAuth 登录、D1 创建／迁移与 `deploy --secrets-fil
 - [Wrangler 账户命令](https://developers.cloudflare.com/workers/wrangler/commands/general/)
 - [D1 命令](https://developers.cloudflare.com/workers/wrangler/commands/d1/)
 - [Worker 部署命令及 secrets-file](https://developers.cloudflare.com/workers/wrangler/commands/workers/)
+
+
+## 2026-09-12 后台自动策略
+
+已增加授权后的预置日频策略后台执行、心跳、暂停恢复、运行记录和导出。现有 Sites 由 GitHub OIDC 定时任务驱动；独立部署自动配置 Cloudflare Cron。详见 [AUTOMATION.md](AUTOMATION.md)。此前“不提供后台自动交易”的描述由本节更新；高频、多租户、任意代码与真实资金仍不在范围内。

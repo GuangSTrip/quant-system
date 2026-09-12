@@ -32,3 +32,19 @@ export const authSessions=sqliteTable('auth_sessions',{
 export const authLimits=sqliteTable('auth_limits',{
   bucket:text('bucket').primaryKey(),attempts:integer('attempts').notNull(),expiresAt:integer('expires_at').notNull()
 });
+
+export const autoStrategy=sqliteTable('auto_strategy',{
+  id:integer('id').primaryKey(),runId:text('run_id'),enabled:integer('enabled').notNull().default(0),revision:integer('revision').notNull().default(0),
+  config:text('config'),backtestId:text('backtest_id'),budget:real('budget').notNull().default(1000),actor:text('actor'),
+  reason:text('reason').notNull().default('尚未启动'),startedAt:text('started_at'),updatedAt:text('updated_at').notNull(),
+  leaseId:text('lease_id'),leaseUntil:integer('lease_until').notNull().default(0),heartbeatAt:text('heartbeat_at'),heartbeatSource:text('heartbeat_source'),
+  lastCheckAt:text('last_check_at'),lastOutcome:text('last_outcome')
+});
+export const autoDecisions=sqliteTable('auto_decisions',{
+  id:text('id').primaryKey(),runId:text('run_id').notNull(),barTime:text('bar_time').notNull(),signal:integer('signal').notNull(),
+  payload:text('payload').notNull(),clientKey:text('client_key'),status:text('status').notNull(),createdAt:text('created_at').notNull(),updatedAt:text('updated_at').notNull()
+},t=>[index('idx_auto_decisions_run').on(t.runId)]);
+export const autoCycles=sqliteTable('auto_cycles',{
+  id:integer('id').primaryKey({autoIncrement:true}),runId:text('run_id'),source:text('source').notNull(),outcome:text('outcome').notNull(),
+  details:text('details').notNull(),createdAt:text('created_at').notNull()
+});

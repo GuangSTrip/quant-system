@@ -2,7 +2,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false};
-  const names = {overview:'账户总览',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收'};
+  const names = {overview:'账户总览',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const types = {limit:'限价',market:'市价',stop:'止损市价',stop_limit:'止损限价'};
@@ -24,6 +24,7 @@
     if(!response.ok){if(response.status===401&&path!=='session'&&path!=='auth/login')await loadSession();const e=new Error(data.error||'请求失败');e.code=data.code;throw e;}return data;
   }
   function showView(view){
+    if(view==='automation')loadAutomation();
     if(!names[view])view='overview';
     document.querySelectorAll('.view').forEach(e=>{e.hidden=e.id!=='view-'+view;});
     document.querySelectorAll('[data-view]').forEach(e=>{e.classList.toggle('active',e.dataset.view===view);e.setAttribute('aria-current',e.dataset.view===view?'page':'false');});
@@ -194,6 +195,19 @@
   $('acceptance-cancel').addEventListener('click',()=>{const r=state.acceptance?.run;if(!r)return;if(state.pending){showConfirmation({...state.pending,recovery:true});return;}const allow=$('acceptance-queued').checked;if(!state.overview?.clock?.is_open&&!allow){message('acceptance-message','休市时请先勾选允许本次限价委托排队。',true);return;}askAction('确认独立撤单验证','将以 '+money(r.cancel_order.limit_price)+' 买入 1 股 '+r.symbol+'，随后立即申请撤销。这会实际向 Alpaca Paper 提交额外一笔订单；如果已成交，成交部分不能撤回。重复此步骤只查询／撤销同一个订单号。',()=>api('acceptance/cancel-check',{id:r.id,confirm:true,allow_queued:allow}));});
   $('acceptance-inspect').addEventListener('click',()=>busy($('acceptance-inspect'),inspectAcceptance));$('acceptance-export').addEventListener('click',exportAcceptance);$('acceptance-export-json').addEventListener('click',()=>{if(state.acceptance)download('paper-acceptance-'+state.acceptance.run.id+'.json',state.acceptance);});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){loadSession();refresh();}});
+  let autoData=null;
+  const autoNames={paused:'已暂停',busy:'执行中',market_closed:'等待开市',pending_order:'跟踪挂单',already_evaluated:'本根日线已处理',no_order:'保持仓位',submitted:'已提交',fault:'异常暂停',halted:'全局暂停'};
+  async function autoReports(){try{const d=await api('artifacts?kind=backtest');$('auto-report').replaceChildren(...d.items.map(r=>{const o=node('option','',r.name+' · '+date(r.created_at));o.value=r.id;return o;}));}catch(e){message('auto-message',e.message,true);}}
+  async function loadAutomation(){if(!state.session?.operator)return;try{const d=await api('automation');autoData=d;const s=d.state;$('auto-status').replaceChildren(details([['策略状态',s.enabled?'运行中':'已暂停'],['策略 / 标的',s.config?s.config.name+' / '+s.config.symbol:'尚未部署'],['预算',money(s.budget)],['后台连接',d.scheduler.healthy?'已收到心跳':'未收到近期心跳'],['最近后台心跳',date(s.heartbeat_at)],['最近执行',date(s.last_check_at)],['运行说明',s.reason]]));if(!d.cycles.length)emptyTable('auto-cycles',4,'暂无运行记录，后台心跳不会自行启动策略。');else $('auto-cycles').replaceChildren(...d.cycles.map(r=>{const tr=node('tr');for(const v of [date(r.created_at),{github:'后台定时',cloudflare:'云端定时',manual:'立即检查'}[r.source]||r.source,autoNames[r.outcome]||r.outcome,(r.details.message||'')+(r.details.client_order_id?' · '+r.details.client_order_id:'')])tr.append(node('td','',v));return tr;}));if(!$('auto-report').options.length)await autoReports();}catch(e){message('auto-message',e.message,true);}}
+  async function autoAction(path,body,button){return busy(button,async()=>{try{message('auto-message','正在处理…');const r=await api('automation/'+path,body);message('auto-message',r.message||'已完成，请查看最新状态与执行记录。',r.ok===false);await loadAutomation();await refresh();}catch(e){message('auto-message',e.message,true);}});}
+  $('auto-form').addEventListener('submit',e=>{e.preventDefault();autoAction('start',{backtest_id:$('auto-report').value,budget:Number($('auto-budget').value),confirm:$('auto-confirm').value},e.submitter);});
+  $('auto-resume').addEventListener('click',e=>autoAction('resume',{confirm:$('auto-confirm').value},e.currentTarget));
+  $('auto-pause').addEventListener('click',e=>autoAction('pause',{},e.currentTarget));
+  $('auto-cancel').addEventListener('click',e=>autoAction('pause',{cancel:true},e.currentTarget));
+  $('auto-tick').addEventListener('click',e=>autoAction('tick',{},e.currentTarget));
+  $('auto-refresh').addEventListener('click',loadAutomation);$('auto-reports-reload').addEventListener('click',autoReports);
+  $('auto-export').addEventListener('click',()=>{if(autoData)download('quant-auto-run-'+(autoData.state.run_id||'status')+'.json',autoData);});
+  setInterval(()=>{if(!$('view-automation').hidden)loadAutomation();},15000);
   async function init(){
     syncAccess();updateOrderFields();showView(location.hash.slice(1));
     try{const pending=JSON.parse(sessionStorage.getItem('quant.pending.v1')||'null');if(pending?.client_id&&['orders','plans/submit','acceptance/submit'].includes(pending.path)&&pending.payload&&pending.order)state.pending=pending;}catch{}renderPending();

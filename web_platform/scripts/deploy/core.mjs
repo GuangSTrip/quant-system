@@ -4,7 +4,7 @@ export const PAPER='https://paper-api.alpaca.markets';
 export function configuration(state){
   if(!/^[a-z0-9][a-z0-9-]{2,49}$/.test(state.name)||!/^[a-f0-9]{32}$/.test(state.accountId))throw Error('无效的部署名称或 Cloudflare 账户 ID');
   return {name:state.name,account_id:state.accountId,main:'../worker/index.js',compatibility_date:'2026-05-15',workers_dev:true,
-    vars:{AUTH_USERNAME:state.username},d1_databases:[{binding:'DB',database_name:state.name+'-db',database_id:state.databaseId,migrations_dir:'../drizzle'}]};
+    triggers:{crons:['*/5 * * * *']},vars:{AUTH_USERNAME:state.username,SCHEDULER_NATIVE:'true'},d1_databases:[{binding:'DB',database_name:state.name+'-db',database_id:state.databaseId,migrations_dir:'../drizzle'}]};
 }
 export function deploymentURL(output,name){
   const matches=output.match(/https:\/\/[a-z0-9.-]+\.workers\.dev\b/g)||[];
