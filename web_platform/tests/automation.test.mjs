@@ -51,3 +51,10 @@ test('automatic buy, broker fill reconciliation, and next daily exit preserve th
 test('failure persisting a decision prevents the broker side effect',async t=>{
  const h=await start(t);h.db.fail=sql=>sql.startsWith('INSERT INTO auto_decisions');await worker.scheduled({},h.env);assert.equal(h.broker.posts().length,0);assert.equal(h.db.get('SELECT enabled FROM auto_strategy').enabled,0);
 });
+
+test('failure to persist a fault pause retains the recovery lease and cannot silently restart',async t=>{
+ const h=await start(t);h.broker.quote.latestQuote.t='2020-01-01T00:00:00Z';h.db.fail=sql=>sql.startsWith('UPDATE auto_strategy SET enabled=0');
+ await assert.rejects(worker.scheduled({},h.env));assert.equal(h.broker.posts().length,0);assert.ok(h.db.get('SELECT lease_id FROM auto_strategy').lease_id);
+ h.db.fail=null;h.broker.quote.latestQuote.t=h.broker.clock.timestamp;assert.equal((await worker.scheduled({},h.env)).outcome,'busy');assert.equal(h.broker.posts().length,0);
+ h.db.sqlite.prepare('UPDATE auto_strategy SET lease_until=?').run(Date.now()-1);await worker.scheduled({},h.env);assert.equal(h.db.get('SELECT enabled FROM auto_strategy').enabled,0);assert.equal(h.broker.posts().length,0);
+});

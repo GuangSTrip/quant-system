@@ -48,6 +48,7 @@ export function createAutomation(services){
     }
     const lease=crypto.randomUUID();const claimed=await run(db,'UPDATE auto_strategy SET lease_id=?,lease_until=? WHERE id=1 AND enabled=1 AND revision=? AND lease_id IS NULL',lease,Date.now()+180000,s.revision);if(!claimed.meta.changes)return {ok:true,outcome:'busy'};
     const user={id:'auto:'+s.run_id};
+    let releaseLease=true;
     try{
       if((await control(db)).halted){await pause(db,user,'全局交易已暂停，请分别恢复交易和策略');return record(db,s,source,'halted',{message:'全局交易已暂停'});}
       requireValue((await reconcile(env,db,user)).ok,'自动对账未通过',409,'RECONCILIATION_FAILED');
@@ -81,8 +82,12 @@ export function createAutomation(services){
       await run(db,'UPDATE auto_decisions SET status=?,updated_at=? WHERE id=?',result.ok?'submitted':'unknown',nowISO(),id);
       requireValue(result.ok,'订单状态未确认，请对账后恢复',409,'UNRESOLVED_ORDER');
       return record(db,s,source,'submitted',{...details,client_order_id:result.order.client_order_id,broker_status:result.order.status});
-    }catch(e){await pause(db,user,e.message||'执行异常');await record(db,s,source,'fault',{message:e.message||'执行异常',code:e.code||'SERVICE_UNAVAILABLE'});return {ok:false,outcome:'fault',code:e.code||'SERVICE_UNAVAILABLE',message:e.message||'执行异常'};}
-    finally{await run(db,'UPDATE auto_strategy SET lease_id=NULL,lease_until=0 WHERE id=1 AND lease_id=?',lease);}
+    }catch(e){
+      // If storage cannot persist the fault pause, keep the lease as a durable
+      // recovery barrier. A later tick must not silently resume this run.
+      try{await pause(db,user,e.message||'执行异常');}catch(storageError){releaseLease=false;throw storageError;}
+      await record(db,s,source,'fault',{message:e.message||'执行异常',code:e.code||'SERVICE_UNAVAILABLE'});return {ok:false,outcome:'fault',code:e.code||'SERVICE_UNAVAILABLE',message:e.message||'执行异常'};
+    }finally{if(releaseLease)await run(db,'UPDATE auto_strategy SET lease_id=NULL,lease_until=0 WHERE id=1 AND lease_id=?',lease);}
   }
   async function cancelRun(env,db,user){const s=await autoState(db);await pause(db,user,'操作员暂停并撤销策略委托');const pending=await rows(db,"SELECT client_id FROM orders WHERE actor=? AND status NOT IN ('filled','canceled','expired','rejected','replaced')",'auto:'+s.run_id);const results=[];for(const p of pending)results.push(await cancelOrders(env,db,user,p.client_id));return {ok:true,results};}
   return {status,configure,resume,pause,tick,cancelRun};
