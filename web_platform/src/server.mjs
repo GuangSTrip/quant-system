@@ -346,7 +346,7 @@ async function route(request,env){
   if(path==='/api/v1/reconcile')return json(await reconcile(env,db,user));
   if(path==='/api/v1/control')return json(await setHalt(env,db,user,input));
   if(path==='/api/v1/risk'){
-    const settings={max_order:numeric(input.max_order,'单笔限额',100,10000),max_daily:numeric(input.max_daily,'单日限额',100,50000),max_position:numeric(input.max_position,'单标的上限',0.01,0.5),max_loss:numeric(input.max_loss,'当日亏损上限',0.005,0.1)};
+    const settings={max_order:numeric(input.max_order,'单笔限额',100,Number.MAX_SAFE_INTEGER/100),max_daily:numeric(input.max_daily,'单日限额',100,Number.MAX_SAFE_INTEGER/100),max_position:numeric(input.max_position,'单标的上限',0.01,0.5),max_loss:numeric(input.max_loss,'当日亏损上限',0.005,0.1)};
     requireValue(settings.max_daily>=settings.max_order,'单日限额不得小于单笔限额');
     const lease=await acquire(db);try{await db.batch([db.prepare('UPDATE control SET max_order=?,max_daily=?,max_position=?,max_loss=?,revision=revision+1,updated_at=? WHERE id=1').bind(settings.max_order,settings.max_daily,settings.max_position,settings.max_loss,nowISO()),await auditStatement(db,user.id,'risk_settings',null,settings)]);}finally{await release(db,lease);}
     return json({ok:true,control:publicControl(await control(db))});
