@@ -10,12 +10,11 @@ export async function autoGuard(db,order,automation){
 }
 export function createAutomation(services){
   const {accountContext,history,snapshotQuote,requireCourseAsset,submitOrder,reconcile,audit,artifact,control,cancelOrders}=services;
-  async function status(db,env){const s=await autoState(db);return {ok:true,state:{...s,config:s.config?JSON.parse(s.config):null,lease_id:undefined},scheduler:{configured:Boolean(env.SCHEDULER_NATIVE==='true'||env.SCHEDULER_REPOSITORY_ID),kind:env.SCHEDULER_NATIVE==='true'?'cloudflare':'github',healthy:Boolean(s.heartbeat_at&&Date.now()-Date.parse(s.heartbeat_at)<75*60000)},cycles:(await rows(db,'SELECT * FROM auto_cycles ORDER BY id DESC LIMIT 60')).map(r=>({...r,details:JSON.parse(r.details)})),orders:(await rows(db,'SELECT client_id,status,broker_data,error FROM orders WHERE actor=? ORDER BY created_at DESC LIMIT 100','auto:'+s.run_id)).map(r=>({...r,broker_data:r.broker_data?JSON.parse(r.broker_data):null})),decisions:(await rows(db,'SELECT * FROM auto_decisions WHERE run_id=? ORDER BY created_at DESC LIMIT 30',s.run_id||'')).map(r=>({...r,payload:JSON.parse(r.payload)}))};}
+  async function status(db,env){const s=await autoState(db),healthy=Boolean(s.heartbeat_at&&Date.now()-Date.parse(s.heartbeat_at)>=0&&Date.now()-Date.parse(s.heartbeat_at)<75*60000),last=s.last_check_at?await get(db,'SELECT source FROM auto_cycles WHERE run_id IS ? AND created_at=? ORDER BY id DESC LIMIT 1',s.run_id,s.last_check_at):null;const execution_state=!s.enabled?'paused':!s.last_check_at?'awaiting_execution':last?.source==='manual'?'manual_checked':healthy?'scheduled_checked':'awaiting_scheduler';return {ok:true,state:{...s,execution_state,last_execution_source:last?.source||null,config:s.config?JSON.parse(s.config):null,lease_id:undefined},scheduler:{configured:Boolean(env.SCHEDULER_NATIVE==='true'||env.SCHEDULER_REPOSITORY_ID),kind:env.SCHEDULER_NATIVE==='true'?'cloudflare':'github',healthy},cycles:(await rows(db,'SELECT * FROM auto_cycles ORDER BY id DESC LIMIT 60')).map(r=>({...r,details:JSON.parse(r.details)})),orders:(await rows(db,'SELECT client_id,status,broker_data,error FROM orders WHERE actor=? ORDER BY created_at DESC LIMIT 100','auto:'+s.run_id)).map(r=>({...r,broker_data:r.broker_data?JSON.parse(r.broker_data):null})),decisions:(await rows(db,'SELECT * FROM auto_decisions WHERE run_id=? ORDER BY created_at DESC LIMIT 30',s.run_id||'')).map(r=>({...r,payload:JSON.parse(r.payload)}))};}
   async function pause(db,user,reason='操作员暂停'){await autoState(db);await db.batch([db.prepare('UPDATE auto_strategy SET enabled=0,revision=revision+1,reason=?,updated_at=? WHERE id=1').bind(reason,nowISO()),await services.auditStatement(db,user.id,'strategy_paused',null,{reason})]);}
   async function configure(env,db,user,input){
     requireValue(input.confirm==='启动自动模拟交易','请输入“启动自动模拟交易”');
     const old=await autoState(db);requireValue(!old.enabled,'请先暂停当前策略');requireValue(!old.lease_id||old.lease_until<Date.now(),'上一轮仍在执行，请稍后再启动');
-    requireValue((env.SCHEDULER_NATIVE==='true'||env.SCHEDULER_REPOSITORY_ID)&&old.heartbeat_at&&Date.now()-Date.parse(old.heartbeat_at)<75*60000,'后台调度尚未收到有效心跳，请等待调度恢复后启动',409,'SCHEDULER_OFFLINE');
     const lease=await services.acquire(db);
     try{
       const c=await control(db);requireValue(!c.halted,'请先在风控页对账并恢复模拟交易',409,'HALTED');
@@ -33,15 +32,14 @@ export function createAutomation(services){
   async function resume(env,db,user,input){
     requireValue(input.confirm==='启动自动模拟交易','请输入“启动自动模拟交易”');const s=await autoState(db);requireValue(s.run_id&&!s.enabled,'请先创建或暂停策略');
     requireValue(!s.lease_id||s.lease_until<Date.now(),'上一轮仍在执行，请稍后重试');
-    requireValue(s.heartbeat_at&&Date.now()-Date.parse(s.heartbeat_at)<75*60000,'后台调度心跳已过期',409,'SCHEDULER_OFFLINE');
     requireValue((await reconcile(env,db,user)).ok,'对账未通过',409,'RECONCILIATION_FAILED');requireValue(!(await control(db)).halted,'请先恢复全局交易',409,'HALTED');
-    const changed=await db.batch([db.prepare('UPDATE auto_strategy SET enabled=1,revision=revision+1,reason=?,updated_at=?,lease_id=NULL,lease_until=0 WHERE id=1 AND revision=? AND enabled=0').bind('等待后台检查',nowISO(),s.revision),await services.auditStatement(db,user.id,'strategy_resumed',s.run_id,{})]);requireValue(changed[0].meta.changes===1,'状态已变化，请刷新');return status(db,env);
+    const changed=await db.batch([db.prepare('UPDATE auto_strategy SET enabled=1,revision=revision+1,reason=?,updated_at=?,lease_id=NULL,lease_until=0,last_check_at=NULL,last_outcome=NULL WHERE id=1 AND revision=? AND enabled=0').bind('等待后台检查',nowISO(),s.revision),await services.auditStatement(db,user.id,'strategy_resumed',s.run_id,{})]);requireValue(changed[0].meta.changes===1,'状态已变化，请刷新');return status(db,env);
   }
   async function record(db,s,source,outcome,details){const stamp=nowISO();await db.batch([db.prepare('INSERT INTO auto_cycles (run_id,source,outcome,details,created_at) VALUES (?,?,?,?,?)').bind(s.run_id,source,outcome,JSON.stringify(details),stamp),db.prepare('UPDATE auto_strategy SET last_check_at=?,last_outcome=?,reason=CASE WHEN enabled=1 THEN ? ELSE reason END,updated_at=? WHERE id=1 AND run_id IS ?').bind(stamp,outcome,details.message||outcome,stamp,s.run_id),db.prepare('DELETE FROM auto_cycles WHERE id NOT IN (SELECT id FROM auto_cycles ORDER BY id DESC LIMIT 1000)')]);return {ok:true,outcome,...details};}
   async function tick(env,db,source='manual'){
     let s=await autoState(db);
     if(source!=='manual'){await run(db,'UPDATE auto_strategy SET heartbeat_at=?,heartbeat_source=? WHERE id=1',nowISO(),source);}
-    if(!s.enabled)return {ok:true,outcome:'paused',message:'策略未启动；调度心跳已接收'};
+    if(!s.enabled)return {ok:true,outcome:'paused',message:source==='manual'?'策略已暂停，请先授权启动或恢复':'策略未启动；调度心跳已接收'};
     if(s.lease_id){
       if(s.lease_until<Date.now())await pause(db,{id:'scheduler'},'上一轮中断，请对账后人工恢复');
       return {ok:true,outcome:'busy',message:'上一轮尚未结束'};

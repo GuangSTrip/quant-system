@@ -37,8 +37,25 @@ test('stale quote cannot leak an automatic order',async t=>{
 test('an interrupted runner is not automatically taken over',async t=>{
  const h=await start(t);h.db.sqlite.prepare('UPDATE auto_strategy SET lease_id=?,lease_until=?').run('abandoned',Date.now()-1);await worker.scheduled({},h.env);assert.equal(h.broker.posts().length,0);assert.equal(h.db.get('SELECT enabled FROM auto_strategy').enabled,0);
 });
-test('deployment needs fresh background heartbeat and explicit operator activation',async t=>{
- const h=setup(t);h.env.SCHEDULER_NATIVE='true';await h.resume();assert.equal((await h.request('/api/v1/automation/start',{confirm:'启动自动模拟交易'})).data.code,'SCHEDULER_OFFLINE');assert.equal((await h.request('/api/v1/automation/tick',{}, {auth:false})).status,401);assert.equal((await h.request('/api/v1/scheduler/tick',{}, {auth:false})).status,503);assert.equal(h.broker.posts().length,0);
+test('missing heartbeat allows authorized start and manual execution without fabricating background health',async t=>{
+ const h=setup(t);h.env.SCHEDULER_NATIVE='true';await h.resume();
+ const report=await h.request('/api/v1/backtests',{config:{symbol:'SPY',type:'buy_hold',allocation:.01}});
+ const input={backtest_id:report.data.id,budget:1000,confirm:'启动自动模拟交易'};
+ assert.equal((await h.request('/api/v1/automation/start',input,{auth:false})).status,401);
+ assert.notEqual((await h.request('/api/v1/automation/start',{...input,confirm:''})).status,200);
+ const started=await h.request('/api/v1/automation/start',input);assert.equal(started.data.state.enabled,1);assert.equal(started.data.state.execution_state,'awaiting_execution');assert.equal(started.data.scheduler.healthy,false);assert.equal(h.broker.posts().length,0);
+ assert.equal((await h.request('/api/v1/automation/tick',{}, {auth:false})).status,401);
+ assert.equal((await h.request('/api/v1/scheduler/tick',{}, {auth:false})).status,503);
+ await h.request('/api/v1/automation/tick',{});assert.equal(h.broker.posts().length,1);
+ let status=(await h.request('/api/v1/automation')).data;assert.equal(status.state.execution_state,'manual_checked');assert.equal(status.state.last_execution_source,'manual');assert.equal(status.scheduler.healthy,false);assert.equal(status.state.heartbeat_at,null);
+ await h.request('/api/v1/automation/tick',{});assert.equal(h.broker.posts().length,1);
+ await worker.scheduled({},h.env);status=(await h.request('/api/v1/automation')).data;assert.equal(status.state.execution_state,'scheduled_checked');assert.equal(status.scheduler.healthy,true);assert.equal(h.broker.posts().length,1);
+});
+test('expired heartbeat allows resume but resets prior execution status and retains global halt guard',async t=>{
+ const h=await start(t);await h.request('/api/v1/automation/tick',{});await h.request('/api/v1/automation/pause',{});
+ const stale=new Date(Date.now()-3*3600000).toISOString();h.db.sqlite.prepare('UPDATE auto_strategy SET heartbeat_at=?').run(stale);
+ h.db.sqlite.prepare('UPDATE control SET halted=1').run();assert.equal((await h.request('/api/v1/automation/resume',{confirm:'启动自动模拟交易'})).data.code,'HALTED');
+ await h.resume();const resumed=await h.request('/api/v1/automation/resume',{confirm:'启动自动模拟交易'});assert.equal(resumed.data.state.enabled,1);assert.equal(resumed.data.state.execution_state,'awaiting_execution');assert.equal(resumed.data.state.last_check_at,null);assert.equal(resumed.data.scheduler.healthy,false);assert.equal(resumed.data.state.heartbeat_at,stale);
 });
 
 test('automatic buy, broker fill reconciliation, and next daily exit preserve the strategy position ledger',async t=>{

@@ -5,7 +5,7 @@
 ## 使用流程
 
 1. 在「策略与回测」运行并保存一份真实行情回测。在「风控与对账」完成对账并恢复全局交易。
-2. 打开「自动策略」，确认后台心跳已到达，选择回测报告，输入独立预算，再输入“启动自动模拟交易”并启动。首次启动要求所选标的没有持仓与未完成委托。预算不超过全局单笔限额。
+2. 打开「自动策略」，选择回测报告，输入独立预算，再输入“启动自动模拟交易”并启动。首次启动要求所选标的没有持仓与未完成委托。预算不超过全局单笔限额。
 3. 等待后台执行；课堂可点击「立即检查一轮」执行同一服务端流程。该按钮可能真实提交模拟订单。查看后台记录、订单状态和券商成交回报，导出运行证据。
 
 后台按最新完整日线计算信号，持有信号且空仓时按预算买入；已持有时保持仓位；空仓信号时卖出该策略的持仓。独立预算与回测的百分比仓位不同，页面明确分别配置。每根完整日线最多做一次决策。成交价、成交时间和未成交均以券商为准，固定限价不会持续追价重挂，日频策略不保证每轮产生交易。
@@ -20,11 +20,11 @@
 
 ## 调度部署
 
-当前 Sites 站点由本仓库 `.github/workflows/paper-scheduler.yml` 驱动，工作日 UTC 13–21 时每 10 分钟检查，所有日期每小时第 17 分钟另发一次心跳。覆盖美股冬夏令时常规时段，实际是否开市以 Alpaca 时钟为准。GitHub 可能延迟或跳过调度，它不是实时撮合或高可用交易系统；后台心跳超过 75 分钟则显示异常并阻止新启动／恢复。网页显示的是实际心跳和执行时间，不用浏览器刷新伪造后台运行。
+当前 Sites 站点由本仓库 `.github/workflows/paper-scheduler.yml` 驱动，工作日 UTC 13–21 时每 10 分钟检查，所有日期每小时第 17 分钟另发一次心跳。覆盖美股冬夏令时常规时段，实际是否开市以 Alpaca 时钟为准。GitHub 可能延迟或跳过调度，它不是实时撮合或高可用交易系统；后台心跳超过 75 分钟则显示异常，但不再阻止新启动／恢复；授权保存后显示等待首次执行，手动检查与后台执行分别标识。网页显示的是实际心跳和执行时间，不用浏览器刷新伪造后台运行。
 
 任务使用 GitHub OIDC 短时身份，仅能调用调度接口，不能更改策略或代替登录用户授权启动。服务端校验签名、时效、发行者、受众、仓库和所有者不可变 ID、main 分支、固定工作流路径、事件类型和 subject。无需把 Alpaca 密钥或网站密码写进 GitHub。仅原仓库 ID 的任务运行；组员复制或 fork 后不会触发原账户。GitHub Actions 额度由仓库账户管理，额度不足或 Actions 被关闭会中断后台检查。
 
-组员执行 `npm run deploy` 时，Wrangler 自动配置 Cloudflare 原生 `*/5 * * * *` Cron 与 `SCHEDULER_NATIVE=true`，无需另建 GitHub 定时任务。部署后等待第一轮真实心跳再启动策略，Cron 变更可能需要传播时间。原生 Cron 调用相同执行器。
+组员执行 `npm run deploy` 时，Wrangler 自动配置 Cloudflare 原生 `*/5 * * * *` Cron 与 `SCHEDULER_NATIVE=true`，无需另建 GitHub 定时任务。部署后可先保存启动授权并手动检查一轮，Cron 变更可能需要传播时间。原生 Cron 调用相同执行器。
 
 原 Sites 调度配置为非秘密环境项 `SCHEDULER_REPOSITORY`、`SCHEDULER_REPOSITORY_ID`、`SCHEDULER_OWNER_ID`、`SCHEDULER_AUDIENCE`，API 为 `POST /api/v1/scheduler/tick`，必须提供经验证的 OIDC 身份。策略管理和手动执行 API 仍需网站登录与同源检查。
 
@@ -37,3 +37,7 @@
 本次实现针对课程模拟盘。机构多租户、任意代码沙箱、分钟／Tick 策略、AI 自主调整与真实资金交易不属于该实现。
 
 依据：[GitHub OIDC](https://docs.github.com/en/actions/reference/security/oidc)、[GitHub 定时事件限制](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)、[Cloudflare Cron](https://developers.cloudflare.com/workers/configuration/cron-triggers/)。
+
+## 心跳过期时的网页操作
+
+后台近期未响应时，仍可授权启动或恢复，然后点击「立即检查一轮」执行既有 Paper 策略流程。启动授权本身不提交订单；手动检查可能提交。登录、确认文字、全局暂停、预算、空仓、对账、行情与订单风控保持生效。手动检查不刷新后台心跳，不能证明关闭网页后持续运行；后台调度延迟问题独立保留提示。
