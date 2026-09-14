@@ -1,4 +1,5 @@
 name: Paper strategy scheduler
+run-name: Paper scheduler · ${{ github.event_name }} · run ${{ github.run_number }}
 on:
   schedule:
     - cron: '3,13,23,33,43,53 13-21 * * 1-5'
@@ -36,7 +37,7 @@ jobs:
           const response=await fetch(origin+'/api/v1/scheduler/tick',{method:'POST',headers:{Authorization:'Bearer '+value,'Content-Type':'application/json'},body:'{}',redirect:'manual',signal:AbortSignal.timeout(170000)});
           if(!response.ok)throw Error('Platform scheduler request failed: '+response.status);
           const result=await response.json();
-          const summary={checked_at:new Date().toISOString(),ok:result.ok,outcome:result.outcome,message:result.message||null};
+          const summary={checked_at:new Date().toISOString(),trigger:process.env.GITHUB_EVENT_NAME,run_url:process.env.GITHUB_SERVER_URL+'/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID,ok:result.ok,outcome:result.outcome,message:result.message||null};
           console.log(JSON.stringify(summary));
           appendFileSync(process.env.GITHUB_STEP_SUMMARY,'Paper scheduler result:\n\n```json\n'+JSON.stringify(summary,null,2)+'\n```\n');
           if(!result.ok)throw Error('Strategy paused after a runtime fault. Inspect the platform run log.');
