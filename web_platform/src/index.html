@@ -4,6 +4,7 @@
 <div class="app-shell">
   <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>课程交易平台</small></span></a>
     <nav aria-label="主导航">
+      <button data-view="hk" class="nav">港 <span>港股模拟账户</span></button>
       <button data-view="showcase" class="nav active">00 <span>成果演示</span></button>
       <button data-view="library" class="nav">库 <span>三市场策略库</span></button>
       <button data-view="overview" class="nav">01 <span>账户总览</span></button>
@@ -39,7 +40,12 @@
       <article class="panel"><p class="eyebrow">LOW-FREQUENCY EXTENSION</p><h2>低频策略接入位置</h2><p class="caption">低频组员可提交同一报告字段：市场、标的、策略名、数据来源、时间范围、成本、逐笔交易及净值。低频计算和交易授权仍由其独立实现。</p></article>
     </section>
 
-    <section id="view-overview" class="view" hidden>
+    <section id="view-hk" class="view" hidden>
+<div class="panel"><h2>港股模拟账户 · 富途</h2><p>当前接入阶段：查询模拟资金、持仓、订单和港股报价。下单与自动执行尚未开放；这里不使用策略库的合成数据。</p>
+<form id="hk-form" class="actions"><label>港股代码<input id="hk-symbol" value="HK.00700" maxlength="10" required></label><button id="hk-refresh" type="submit">查询富途模拟账户</button></form>
+<p id="hk-status" role="status">登录后点击查询。未配置网关时会显示明确提示。</p><div id="hk-result"></div>
+<details><summary>如何连接</summary><p>在常驻电脑或服务器登录富途 OpenD，并运行仓库内 futu_bridge 服务。网站后台配置 FUTU_BRIDGE_URL 和 FUTU_BRIDGE_TOKEN。模拟账户 ID 仅配置在桥接服务。详细步骤见仓库 web_platform/HK_INTEGRATION.md。</p></details></div></section>
+<section id="view-overview" class="view" hidden>
       <div class="metrics"><article class="metric featured"><span>模拟账户净值</span><strong id="equity">—</strong><small id="daily-pnl">—</small></article><article class="metric"><span>现金</span><strong id="cash">—</strong><small>不使用融资买入</small></article><article class="metric"><span>券商购买力</span><strong id="buying-power">—</strong><small id="account-status">—</small></article><article class="metric"><span>市场状态</span><strong id="market-state">—</strong><small id="market-next">—</small></article></div>
       <div class="two-column"><article class="panel"><div class="panel-head"><div><p class="eyebrow">PAPER ACCOUNT</p><h2>账户净值轨迹</h2></div><select id="equity-period" aria-label="净值时间范围"><option value="1M">近一个月</option><option value="1W">近一周</option><option value="3M">近三个月</option></select></div><div id="equity-chart" class="chart" aria-label="模拟账户净值图"></div><p class="caption" id="equity-caption">读取 Alpaca 账户历史…</p></article>
       <article class="panel quote-panel"><p class="eyebrow">MARKET DATA / IEX</p><h2>行情查询</h2><form id="quote-form" class="form-row"><label>标的<select id="quote-symbol"></select></label><button type="submit">查询行情</button></form><strong id="quote-price" class="quote-price">—</strong><div id="quote-details" class="detail-list">选择标的后查询</div><p class="caption">IEX 单交易所行情；价格时间与抓取时间分别展示。休市时显示最近一条记录。</p><button id="quote-to-trade" class="subtle">用此标的填写订单</button></article></div>

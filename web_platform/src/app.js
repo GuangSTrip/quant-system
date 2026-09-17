@@ -3,7 +3,7 @@ import {createStrategyLab} from './strategy-lab.mjs';
   'use strict';
   const $ = id => document.getElementById(id);
   const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false};
-  const names = {showcase:'成果演示',library:'三市场策略库',overview:'账户总览',strategy:'策略讲解',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
+  const names = {hk:'港股模拟账户',showcase:'成果演示',library:'三市场策略库',overview:'账户总览',strategy:'策略讲解',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const types = {limit:'限价',market:'市价',stop:'止损市价',stop_limit:'止损限价'};
@@ -258,6 +258,24 @@ import {createStrategyLab} from './strategy-lab.mjs';
   $('acceptance-submit').addEventListener('click',()=>busy($('acceptance-submit'),async()=>{try{await previewAcceptance();}catch(e){message('acceptance-message',e.message,true);}}));
   $('acceptance-cancel').addEventListener('click',()=>{const r=state.acceptance?.run;if(!r)return;if(state.pending){showConfirmation({...state.pending,recovery:true});return;}const allow=$('acceptance-queued').checked;if(!state.overview?.clock?.is_open&&!allow){message('acceptance-message','休市时请先勾选允许本次限价委托排队。',true);return;}askAction('确认独立撤单验证','将以 '+money(r.cancel_order.limit_price)+' 买入 1 股 '+r.symbol+'，随后立即申请撤销。这会实际向 Alpaca Paper 提交额外一笔订单；如果已成交，成交部分不能撤回。重复此步骤只查询／撤销同一个订单号。',()=>api('acceptance/cancel-check',{id:r.id,confirm:true,allow_queued:allow}));});
   $('acceptance-inspect').addEventListener('click',()=>busy($('acceptance-inspect'),inspectAcceptance));$('acceptance-export').addEventListener('click',exportAcceptance);$('acceptance-export-json').addEventListener('click',()=>{if(state.acceptance)download('paper-acceptance-'+state.acceptance.run.id+'.json',state.acceptance);});
+
+  $('hk-form').addEventListener('submit',e=>{e.preventDefault();busy($('hk-refresh'),async()=>{
+    $('hk-result').replaceChildren();text('hk-status','正在查询富途模拟账户…');
+    try {
+      const d=await api('hk/overview?symbol='+encodeURIComponent($('hk-symbol').value));
+      text('hk-status',d.status==='not_configured'?d.message:(d.ok?'查询成功':'部分查询失败')+' · 富途模拟盘 · HKD · 查询时间 '+d.fetched_at+'（行情时间见下表）');
+      const sections=[['account','账户资金',{total_assets:'总资产 HKD',cash:'现金 HKD',market_val:'证券市值 HKD'}],['quote','行情',{code:'代码',name:'名称',last_price:'最新价',lot_size:'每手股数',update_time:'报价时间（香港）',suspension:'停牌'}],['positions','持仓',{code:'代码',qty:'持有股数',can_sell_qty:'可卖股数',cost_price:'成本价',pl_val:'浮动盈亏'}],['orders','订单',{order_id:'订单号',code:'代码',order_status:'状态',qty:'委托股数',dealt_qty:'成交股数',dealt_avg_price:'成交均价'}]];
+      if(d.status==='not_configured')return;
+      for(const [key,title,cols] of sections){
+        const h=document.createElement('h3');h.textContent=title;$('hk-result').append(h);
+        if(d.errors?.[key]||!d[key]?.length){const p=document.createElement('p');p.textContent=d.errors?.[key]||'暂无记录';$('hk-result').append(p);continue;}
+        const table=document.createElement('table'),head=table.createTHead().insertRow();
+        for(const label of Object.values(cols)){const th=document.createElement('th');th.textContent=label;head.append(th);}
+        const body=table.createTBody();for(const row of d[key]){const tr=body.insertRow();for(const field of Object.keys(cols)){tr.insertCell().textContent=String(row[field]??'—');}}
+        const wrap=document.createElement('div');wrap.className='table-wrap';wrap.append(table);$('hk-result').append(wrap);
+      }
+    }catch(err){text('hk-status',err.message);}
+  });});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){loadSession();refresh();}});
   let autoData=null;
   const autoNames={paused:'已暂停',busy:'执行中',market_closed:'等待开市',pending_order:'跟踪挂单',waiting_data:'等待新分钟线',already_evaluated:'本根行情已处理',no_order:'保持仓位',submitted:'已提交',filled:'已成交',fault:'异常暂停',halted:'全局暂停'};

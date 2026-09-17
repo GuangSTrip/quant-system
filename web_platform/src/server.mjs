@@ -1,3 +1,4 @@
+import {hkOverview} from './hk.mjs';
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,INTRADAY_SYMBOLS,strategyConfig,isIntraday,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
 import {PAGE,CSS,CLIENT,FROZEN,LIBRARY_DEMO} from './assets.mjs';
 import {broker} from './transport.mjs';
@@ -302,6 +303,7 @@ async function route(request,env){
   const db=database(env);
   if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);await verifyScheduler(request,env);const result=await auto.tick(env,db,'github');console.info(JSON.stringify({event:'scheduler_tick',source:'github',at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
   if(method==='GET'){
+    if(path==='/api/v1/hk/overview'){await operator(request,env,db);return json(await hkOverview(env,url.searchParams.get('symbol')||'HK.00700'));}
     if(path==='/api/v1/automation'){await operator(request,env,db);return json(await auto.status(db,env));}
     if(path==='/api/v1/session'){const u=await identity(request,env,db);return json({ok:true,signed_in:u.signed_in,operator:u.operator,username:u.username,expires_at:u.expires_at,auth_mode:'password',login_enabled:Boolean(env.AUTH_USERNAME&&env.AUTH_PASSWORD_RECORD)});}
     if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
