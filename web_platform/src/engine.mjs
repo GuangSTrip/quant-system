@@ -1,5 +1,8 @@
-export const ENGINE_VERSION = 'course-daily-1.0.0';
+export const ENGINE_VERSION = 'course-intraday-1.2.0';
 export const SYMBOLS = ['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT'];
+export const INTRADAY_TYPES = ['opening_range_breakout','vwap_reversion'];
+export const INTRADAY_SYMBOLS = ['SPY','QQQ','AAPL','MSFT'];
+export const isIntraday = type => INTRADAY_TYPES.includes(type);
 export class AppError extends Error {
   constructor(message,status=400,code='INVALID_REQUEST'){super(message);this.status=status;this.code=code;}
 }
@@ -9,6 +12,11 @@ export async function digest(value){return Array.from(new Uint8Array(await crypt
 export function numeric(value,name,min,max){const n=Number(value);requireValue(value!==null&&value!==''&&Number.isFinite(n)&&n>=min&&n<=max,name+' 超出允许范围');return n;}
 export function symbol(value){const v=String(value||'').toUpperCase();requireValue(SYMBOLS.includes(v),'请选择课程允许的股票或 ETF');return v;}
 export function strategyConfig(input={}){
+  if(isIntraday(input.type)){
+    const c={name:String(input.name||'分钟策略').trim().slice(0,60),symbol:symbol(input.symbol),type:String(input.type),days:numeric(input.days??5,'历史天数',2,30),budget:numeric(input.budget??1000,'策略预算',100,100000),opening_minutes:numeric(input.opening_minutes??15,'开盘观察分钟',5,60),threshold_bps:numeric(input.threshold_bps??20,'触发阈值基点',0,200),cost_bps:numeric(input.cost_bps??10,'单边成本基点',0,100)};
+    requireValue(INTRADAY_SYMBOLS.includes(c.symbol),'分钟策略仅允许 SPY、QQQ、AAPL、MSFT；请先固定可交易范围');
+    requireValue(Number.isInteger(c.days)&&Number.isInteger(c.budget)&&Number.isInteger(c.opening_minutes),'天数、预算和开盘观察分钟须为整数');return c;
+  }
   const c={name:String(input.name||'课程策略').trim().slice(0,60),symbol:symbol(input.symbol),type:String(input.type||'sma'),fast:numeric(input.fast??10,'快周期',2,100),slow:numeric(input.slow??30,'慢周期',5,200),allocation:numeric(input.allocation??0.1,'目标仓位',0.01,0.5),days:numeric(input.days??365,'历史天数',90,1095),cost_bps:numeric(input.cost_bps??10,'单边成本基点',0,100)};
   requireValue(['sma','momentum','buy_hold'].includes(c.type),'未知策略模板');
   requireValue(Number.isInteger(c.fast)&&Number.isInteger(c.slow)&&Number.isInteger(c.days)&&c.fast<c.slow,'周期必须为整数且快周期小于慢周期');
@@ -30,8 +38,58 @@ export function signalAt(bars,i,c){
   const avg=n=>bars.slice(i-n+1,i+1).reduce((s,b)=>s+b.c,0)/n;
   return avg(c.fast)>avg(c.slow)?1:0;
 }
+const nyParts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+const minuteCache=new Map();
+export function marketMinute(timestamp){
+  if(minuteCache.has(timestamp))return minuteCache.get(timestamp);
+  const p=Object.fromEntries(nyParts.formatToParts(new Date(timestamp)).map(x=>[x.type,x.value]));
+  const value={day:`${p.year}-${p.month}-${p.day}`,minute:Number(p.hour)*60+Number(p.minute)};
+  if(minuteCache.size>10000)minuteCache.clear();minuteCache.set(timestamp,value);return value;
+}
+export function intradayDecision(bars,i,c){
+  const current=marketMinute(bars[i].t),session=[];
+  for(let j=i;j>=0;j--){const p=marketMinute(bars[j].t);if(p.day!==current.day)break;if(p.minute>=570&&p.minute<960)session.push(bars[j]);}
+  session.reverse();
+  if(current.minute<570||current.minute>=960)return {signal:0,reason:'常规交易时段外',value:null};
+  if(current.minute>=945)return {signal:0,reason:'15:45 后日内平仓',value:null};
+  if(current.minute<570+c.opening_minutes||session.length<3)return {signal:0,reason:'等待开盘观察区间',value:null};
+  if(c.type==='opening_range_breakout'){
+    const range=session.filter(b=>marketMinute(b.t).minute<570+c.opening_minutes);
+    if(range.length<3)return {signal:0,reason:'开盘区间有效分钟线不足',value:null};
+    const high=Math.max(...range.map(b=>b.h)),mid=(high+Math.min(...range.map(b=>b.l)))/2;
+    const signal=bars[i].c>high*(1+c.threshold_bps/10000)?1:bars[i].c<mid?0:null;
+    return {signal,reason:signal===1?'收盘价突破开盘区间上沿':signal===0?'收盘价跌破开盘区间中点':'保持当前仓位',value:high};
+  }
+  const volume=session.reduce((s,b)=>s+b.v,0);
+  if(volume<=0)return {signal:0,reason:'成交量不足',value:null};
+  const vwap=session.reduce((s,b)=>s+((b.h+b.l+b.c)/3)*b.v,0)/volume;
+  const signal=bars[i].c<=vwap*(1-c.threshold_bps/10000)?1:bars[i].c>=vwap?0:null;
+  return {signal,reason:signal===1?'收盘价低于当日 VWAP 触发线':signal===0?'收盘价回到 VWAP':'保持当前仓位',value:vwap};
+}
+function backtestIntraday(raw,c){
+  const bars=validateBars(raw).filter(b=>{const m=marketMinute(b.t).minute;return m>=570&&m<960;});
+  requireValue(bars.length>=60&&new Set(bars.map(b=>marketMinute(b.t).day)).size>=2,'分钟行情不足：需要至少两个交易日、60 根常规时段分钟线',422,'INSUFFICIENT_DATA');
+  let cash=100000,qty=0,peak=cash,costTotal=0,turnover=0,benchCash=100000,benchQty=0,benchCost=0;
+  const curve=[],trades=[],daily=[],fee=c.cost_bps/10000;
+  const execute=(delta,price,time,signalTime)=>{if(!delta)return;const gross=Math.abs(delta)*price,cost=gross*fee;cash-=delta*price+cost;qty+=delta;costTotal+=cost;turnover+=gross;trades.push({t:time,signal_t:signalTime,side:delta>0?'buy':'sell',qty:Math.abs(delta),price,cost});};
+  for(let i=0;i<bars.length;i++){
+    const b=bars[i],day=marketMinute(b.t).day,prev=i?marketMinute(bars[i-1].t).day:null;
+    if(day!==prev){benchQty=Math.floor(c.budget/(b.o*(1+fee)));const cost=benchQty*b.o*fee;benchCash-=benchQty*b.o+cost;benchCost+=cost;}
+    if(i&&day===prev){const decision=intradayDecision(bars,i-1,c),signal=decision.signal;
+      if(signal!==null){const target=signal?Math.min(Math.floor(c.budget/b.o),Math.floor(cash/(b.o*(1+fee)))+qty):0;execute(target-qty,b.o,b.t,bars[i-1].t);}
+    }
+    const endDay=i===bars.length-1||marketMinute(bars[i+1].t).day!==day;
+    if(endDay){execute(-qty,b.c,b.t,b.t);const cost=benchQty*b.c*fee;benchCash+=benchQty*b.c-cost;benchCost+=cost;benchQty=0;daily.push(cash/100000);}
+    const equity=cash+qty*b.c;peak=Math.max(peak,equity);curve.push({t:b.t,equity,drawdown:equity/peak-1,benchmark:benchCash+benchQty*b.c});
+  }
+  const returns=daily.map((e,i)=>e/(i?daily[i-1]:1)-1),n=returns.length,mean=returns.reduce((s,x)=>s+x,0)/n,sd=Math.sqrt(returns.reduce((s,x)=>s+(x-mean)**2,0)/Math.max(n-1,1));
+  const sorted=[...returns].sort((a,b)=>a-b),var95=sorted[Math.floor(n*.05)],tail=sorted.filter(x=>x<=var95),elapsed=(Date.parse(bars.at(-1).t)-Date.parse(bars[0].t))/86400000;
+  const decision=intradayDecision(bars,bars.length-1,c);
+  return {engine:ENGINE_VERSION,config:c,signal:decision.signal??0,signal_reason:decision.reason,signal_value:decision.value,signal_timestamp:bars.at(-1).t,metrics:{total_return:cash/100000-1,benchmark_return:benchCash/100000-1,benchmark_cost:benchCost,cagr:elapsed>0?(cash/100000)**(365.25/elapsed)-1:0,sharpe:sd?mean/sd*Math.sqrt(252):0,max_drawdown:Math.min(...curve.map(x=>x.drawdown)),volatility:sd*Math.sqrt(252),var95,cvar95:tail.reduce((s,x)=>s+x,0)/tail.length,turnover:turnover/100000,total_cost:costTotal,trade_count:trades.length},curve,trades,quality:{rows:bars.length,from:bars[0].t,to:bars.at(-1).t,duplicates:0,invalid:0},limitations:['分钟历史行情、只做多；收盘前平仓，未模拟股息、税费、冲击和部分成交。','前一根完整分钟线产生信号，下一根开盘价模拟成交；数据中每日最后一根按收盘价强制平仓。','蓝线是同预算、首根开盘买入和末根收盘卖出的日内基准，按同样单边成本计算；它不是跨夜持有。','100,000 美元初始账户中仅使用策略预算。样本少时年化指标仅供演示。']};
+}
 export function backtest(raw,input){
-  const c=strategyConfig(input),bars=validateBars(raw),warmup=c.type==='buy_hold'?1:c.slow;
+  const c=strategyConfig(input);if(isIntraday(c.type))return backtestIntraday(raw,c);
+  const bars=validateBars(raw),warmup=c.type==='buy_hold'?1:c.slow;
   requireValue(bars.length>warmup+20,'历史数据不足：需要慢周期之外至少 20 根完整日线',422,'INSUFFICIENT_DATA');
   let cash=100000,qty=0,peak=cash,priorEquity=cash,priorSignal=0,totalCost=0,turnover=0;
   const curve=[],trades=[],returns=[]; const fee=c.cost_bps/10000;

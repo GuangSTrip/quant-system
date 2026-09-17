@@ -1,4 +1,4 @@
-import {requireValue,nowISO,numeric,strategyConfig,validateBars,signalAt,normalizeOrder,digest,ENGINE_VERSION} from './engine.mjs';
+import {requireValue,nowISO,numeric,strategyConfig,validateBars,signalAt,isIntraday,intradayDecision,normalizeOrder,digest,ENGINE_VERSION} from './engine.mjs';
 const get=(db,sql,...v)=>db.prepare(sql).bind(...v).first();
 const rows=async(db,sql,...v)=>(await db.prepare(sql).bind(...v).all()).results;
 const run=(db,sql,...v)=>db.prepare(sql).bind(...v).run();
@@ -18,8 +18,10 @@ export function createAutomation(services){
     const lease=await services.acquire(db);
     try{
       const c=await control(db);requireValue(!c.halted,'请先在风控页对账并恢复模拟交易',409,'HALTED');
-      const report=await artifact(db,input.backtest_id,'backtest');requireValue(report.payload.engine===ENGINE_VERSION,'回测版本已变化，请重新回测');
-      const config=strategyConfig(report.payload.config),budget=numeric(input.budget,'策略预算',100,Number.MAX_SAFE_INTEGER/100);
+      const report=await artifact(db,input.backtest_id,'backtest'),config=strategyConfig(report.payload.config);
+      requireValue(report.payload.engine===ENGINE_VERSION||report.payload.engine==='course-intraday-1.1.0'||(!isIntraday(config.type)&&report.payload.engine==='course-daily-1.0.0'),'回测版本已变化，请重新回测');
+      const budget=numeric(input.budget,'策略预算',100,Number.MAX_SAFE_INTEGER/100);
+      if(isIntraday(config.type))requireValue(budget===config.budget,'分钟策略预算必须与回测报告一致：'+config.budget+' USD',409,'BUDGET_MISMATCH');
       requireValue(budget<=c.max_order,'策略预算超过当前单笔限额 '+c.max_order+' USD；请在风控与对账中调整并保存限额',409,'STRATEGY_BUDGET_LIMIT');
       await requireCourseAsset(env,config.symbol);
       const ctx=await accountContext(env);requireValue(!ctx.positions.some(p=>p.symbol===config.symbol&&Number(p.qty)!==0)&&!ctx.openOrders.some(o=>o.symbol===config.symbol),'启动新策略前，该标的必须没有持仓和未完成委托；请先处理现有仓位',409,'STRATEGY_NEEDS_FLAT');
@@ -62,25 +64,28 @@ export function createAutomation(services){
       const current=Number(ctx.positions.find(p=>p.symbol===config.symbol)?.qty||0);
       requireValue(Number.isFinite(owned)&&Math.abs(current-owned)<1e-8,'持仓与策略成交账本不一致，可能存在手动或外部交易，请人工对账',409,'STRATEGY_POSITION_DRIFT');
       if(ctx.openOrders.some(o=>o.symbol===config.symbol))return record(db,s,source,'pending_order',{message:'已有未完成委托，跟踪结果，暂不增加订单'});
-      const data=await history(env,config),bars=validateBars(data.bars);requireValue(bars.length>=config.slow,'历史日线不足',422,'INSUFFICIENT_DATA');
-      const bar=bars.at(-1),age=(Date.parse(ctx.clock.timestamp)-Date.parse(bar.t))/86400000;requireValue(age>=0&&age<=7,'信号日线已过期',409,'STALE_SIGNAL');
+      const minute=isIntraday(config.type),data=await history(env,config),bars=validateBars(data.bars);
+      requireValue(bars.length>=(minute?3:config.slow),minute?'历史分钟线不足':'历史日线不足',422,'INSUFFICIENT_DATA');
+      const bar=bars.at(-1),age=Date.parse(ctx.clock.timestamp)-Date.parse(bar.t);
+      if(minute&&(age<0||age>5*60000))return record(db,s,source,'waiting_data',{message:'最近完整分钟线超过 5 分钟，等待新行情；未提交订单',signal_timestamp:bar.t});
+      requireValue(age>=0&&age<=7*86400000,'信号日线已过期',409,'STALE_SIGNAL');
       const id=s.run_id+':'+bar.t,existing=await get(db,'SELECT * FROM auto_decisions WHERE id=?',id);
-      if(existing)return record(db,s,source,'already_evaluated',{message:'当前完整日线已处理，本轮不重复下单',decision_id:id});
-      const signal=signalAt(bars,bars.length-1,config),quote=await snapshotQuote(env,config.symbol);
+      if(existing)return record(db,s,source,'already_evaluated',{message:minute?'当前完整分钟线已处理，本轮不重复下单':'当前完整日线已处理，本轮不重复下单',decision_id:id});
+      const decision=minute?intradayDecision(bars,bars.length-1,config):null,signal=minute?(decision.signal??(owned>0?1:0)):signalAt(bars,bars.length-1,config),quote=await snapshotQuote(env,config.symbol);
       const side=signal?'buy':'sell',price=signal?Number(quote.ap)*1.001:Number(quote.bp)*.999;
       requireValue(price>0&&Number.isFinite(price),'报价不可用',409,'STALE_QUOTE');
       const target=signal?(owned>0?owned:Math.floor(s.budget/price)):0,delta=target-owned;
       const order=Math.abs(delta)>=1?normalizeOrder({symbol:config.symbol,side:delta>0?'buy':'sell',qty:Math.floor(Math.abs(delta)),type:'limit',limit_price:price.toFixed(2),time_in_force:'day'}):null;
       const datasetId='data_'+(await digest({query:data.query,bars:data.bars})).slice(0,40);
       await services.saveArtifact(db,user,'dataset',config.symbol+' 自动策略决策数据',data,datasetId);
-      const key=crypto.randomUUID(),details={snapshot_id:datasetId,config,signal,signal_timestamp:bar.t,owned_qty:owned,target_qty:target,order,source:data.source,data_digest:await digest(bars),engine:ENGINE_VERSION,message:order?'信号产生限价委托':'保持当前仓位，无需下单'};
+      const key=crypto.randomUUID(),details={snapshot_id:datasetId,config,signal,signal_reason:decision?.reason||null,signal_value:decision?.value??null,signal_timestamp:bar.t,owned_qty:owned,target_qty:target,order,source:data.source,data_digest:await digest(bars),engine:ENGINE_VERSION,message:order?(decision?.reason||'信号变化')+'；'+config.symbol+' '+(order.side==='buy'?'买入':'卖出')+' '+order.qty+' 股，限价 '+order.limit_price+' USD':(decision?.reason||'保持当前仓位')+'；'+config.symbol+' 持仓 '+owned+' 股，无需下单'};
       await autoGuard(db,{symbol:config.symbol},{run_id:s.run_id,revision:s.revision});
       await db.batch([db.prepare('INSERT INTO auto_decisions (id,run_id,bar_time,signal,payload,client_key,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(id,s.run_id,bar.t,signal,JSON.stringify(details),order?key:null,order?'prepared':'no_order',nowISO(),nowISO()),await services.auditStatement(db,user.id,'auto_decision',id,details)]);
       if(!order)return record(db,s,source,'no_order',details);
       const result=await submitOrder(env,db,user,{...order,confirm:true,idempotency_key:key},null,{run_id:s.run_id,revision:s.revision});
       await run(db,'UPDATE auto_decisions SET status=?,updated_at=? WHERE id=?',result.ok?'submitted':'unknown',nowISO(),id);
       requireValue(result.ok,'订单状态未确认，请对账后恢复',409,'UNRESOLVED_ORDER');
-      return record(db,s,source,'submitted',{...details,client_order_id:result.order.client_order_id,broker_status:result.order.status});
+      return record(db,s,source,result.order.status==='filled'?'filled':'submitted',{...details,client_order_id:result.order.client_order_id,broker_status:result.order.status});
     }catch(e){
       // If storage cannot persist the fault pause, keep the lease as a durable
       // recovery barrier. A later tick must not silently resume this run.

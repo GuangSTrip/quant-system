@@ -1,5 +1,5 @@
-import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,strategyConfig,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
-import {PAGE,CSS,CLIENT,FROZEN} from './assets.mjs';
+import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,INTRADAY_SYMBOLS,strategyConfig,isIntraday,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
+import {PAGE,CSS,CLIENT,FROZEN,LIBRARY_DEMO} from './assets.mjs';
 import {broker} from './transport.mjs';
 import {identity,login,logout} from './auth.mjs';
 import {createAutomation,autoGuard} from './automation.mjs';
@@ -71,16 +71,16 @@ async function acquire(db){
   return id;
 }
 async function release(db,id){await run(db,'UPDATE control SET lease_id=NULL,lease_until=0 WHERE id=1 AND lease_id=?',id);}
-async function saveBrokerOrder(db,row,order,actor,kind='order_status'){
+async function saveBrokerOrder(env,db,row,order,actor,kind='order_status'){
   const clean=cleanOrder(order);
   await db.batch([db.prepare('UPDATE orders SET broker_id=?,status=?,broker_data=?,error=NULL,updated_at=? WHERE client_id=?').bind(order.id,order.status,JSON.stringify(clean),nowISO(),row.client_id),await auditStatement(db,actor,kind,row.client_id,{status:order.status,filled_qty:order.filled_qty,broker_id:order.id})]);
-  console.info(JSON.stringify({event:'paper_order_receipt',observed_at:nowISO(),action:kind,environment:'Alpaca Paper',client_order_id:row.client_id,broker_order_id:clean.id,symbol:clean.symbol,side:clean.side,status:clean.status,filled_qty:clean.filled_qty,filled_avg_price:clean.filled_avg_price,filled_at:clean.filled_at}));
+  console.info(JSON.stringify({event:'paper_order_receipt',observed_at:nowISO(),action:kind,environment:env.DEMO_MODE==='local-fixture'?'Local broker fixture':'Alpaca Paper',client_order_id:row.client_id,broker_order_id:clean.id,symbol:clean.symbol,side:clean.side,status:clean.status,filled_qty:clean.filled_qty,filled_avg_price:clean.filled_avg_price,filled_at:clean.filled_at}));
   return clean;
 }
 async function findOrder(env,id){return broker(env,'/v2/orders:by_client_order_id?client_order_id='+encodeURIComponent(id),{allow404:true});}
 async function reconcileOne(env,db,row,actor){
   const existing=await findOrder(env,row.client_id);
-  if(existing)return saveBrokerOrder(db,row,existing,actor,'reconcile_order');
+  if(existing)return saveBrokerOrder(env,db,row,existing,actor,'reconcile_order');
   return null;
 }
 async function submitOrder(env,db,user,input,plan=null,automation=null){
@@ -132,7 +132,7 @@ async function submitOrder(env,db,user,input,plan=null,automation=null){
         return {ok:false,order:{client_order_id:clientId,status:rejected?'rejected':'unknown'},message:rejected?e.message:'提交结果未知，已暂停新增订单。请点击对账；系统不会盲目重发。'};
       }
     }
-    const result=await saveBrokerOrder(db,row,placed,user.id,'order_submitted');
+    const result=await saveBrokerOrder(env,db,row,placed,user.id,'order_submitted');
     const stopped=(await control(db)).halted || Boolean(automation && await autoGuard(db,order,automation).then(()=>false,()=>true));
     if(stopped&&!TERMINAL.includes(placed.status)){
       try{await broker(env,'/v2/orders/'+encodeURIComponent(placed.id),{method:'DELETE'});await audit(db,user.id,'halt_cancel_requested',clientId,{broker_id:placed.id});}catch{await audit(db,user.id,'halt_cancel_uncertain',clientId,{broker_id:placed.id});}
@@ -148,7 +148,7 @@ async function cancelOrders(env,db,user,clientId){
     try{
       const order=await findOrder(env,row.client_id);
       if(!order){results.push({client_id:row.client_id,status:'unknown',message:'券商尚未返回此订单，需继续对账'});continue;}
-      if(TERMINAL.includes(order.status)){await saveBrokerOrder(db,row,order,user.id,'cancel_already_terminal');results.push({client_id:row.client_id,status:order.status});continue;}
+      if(TERMINAL.includes(order.status)){await saveBrokerOrder(env,db,row,order,user.id,'cancel_already_terminal');results.push({client_id:row.client_id,status:order.status});continue;}
       await audit(db,user.id,'cancel_requested',row.client_id,{broker_id:order.id});
       await broker(env,'/v2/orders/'+encodeURIComponent(order.id),{method:'DELETE'});
       await run(db,"UPDATE orders SET status='pending_cancel',updated_at=? WHERE client_id=?",nowISO(),row.client_id);
@@ -196,30 +196,40 @@ async function saveArtifact(db,user,kind,name,payload,id=crypto.randomUUID()){
 }
 async function artifact(db,id,kind){const row=await first(db,'SELECT * FROM artifacts WHERE id=? AND kind=?',id,kind);requireValue(row,'记录不存在',404);return {...row,payload:JSON.parse(row.payload)};}
 async function history(env,c){
-  const clock=await broker(env,'/v2/clock'),end=new Date(String(clock.timestamp).slice(0,10)+'T00:00:00Z'),start=new Date(end.getTime()-c.days*86400000);
-  const query=new URLSearchParams({symbols:c.symbol,timeframe:'1Day',start:start.toISOString(),end:new Date(end.getTime()-1).toISOString(),feed:'iex',adjustment:'all',limit:'10000',sort:'asc'});
-  const response=await broker(env,'/v2/stocks/bars?'+query,{data:true});
-  requireValue(!response.next_page_token,'数据超过单次课程任务上限，请缩短区间',422,'DATA_LIMIT');
-  return {source:'Alpaca IEX',adjustment:'all',fetched_at:nowISO(),query:Object.fromEntries(query),bars:response.bars?.[c.symbol]||[]};
+  const clock=await broker(env,'/v2/clock'),minute=isIntraday(c.type),end=minute?new Date(Math.floor((Date.parse(clock.timestamp)-60000)/60000)*60000):new Date(String(clock.timestamp).slice(0,10)+'T00:00:00Z'),start=new Date(end.getTime()-c.days*86400000);
+  const query=new URLSearchParams({symbols:c.symbol,timeframe:minute?'1Min':'1Day',start:start.toISOString(),end:minute?end.toISOString():new Date(end.getTime()-1).toISOString(),feed:'iex',adjustment:minute?'raw':'all',limit:'10000',sort:'asc'});
+  const bars=[],seen=new Set();let pageToken=null,pageCount=0;
+  do{
+    const pageQuery=new URLSearchParams(query);if(pageToken)pageQuery.set('page_token',pageToken);
+    const response=await broker(env,'/v2/stocks/bars?'+pageQuery,{data:true});
+    bars.push(...(response.bars?.[c.symbol]||[]));pageCount++;
+    pageToken=response.next_page_token||null;
+    requireValue(!pageToken||(!seen.has(pageToken)&&pageCount<4),'历史分钟数据分页过多或重复，请缩短区间',422,'DATA_LIMIT');
+    if(pageToken)seen.add(pageToken);
+  }while(pageToken);
+  return {source:env.DEMO_DATA_SOURCE||'Alpaca IEX',adjustment:minute?'raw':'all',fetched_at:env.DEMO_DATA_FETCHED_AT||nowISO(),query:Object.fromEntries(query),page_count:pageCount,bars};
 }
 async function runBacktest(env,db,user,input){
   const c=strategyConfig(input.config),saved=input.snapshot_id?await artifact(db,input.snapshot_id,'dataset'):null;
   requireValue(!saved||saved.payload.query.symbols===c.symbol,'快照标的与策略不一致');
+  requireValue(!saved||saved.payload.query.timeframe===(isIntraday(c.type)?'1Min':'1Day'),'快照频率与策略不一致');
   const data=saved?.payload||await history(env,c),snapshotId=saved?.id||'data_'+(await digest({query:data.query,bars:data.bars})).slice(0,40);
   const result=backtest(data.bars,c),strategyId='strategy_'+(await digest({engine:ENGINE_VERSION,config:c})).slice(0,40);
   await saveArtifact(db,user,'dataset',c.symbol+' '+data.query.start.slice(0,10),data,snapshotId);
   await saveArtifact(db,user,'strategy',c.name,{config:c,engine:ENGINE_VERSION},strategyId);
-  const payload={...result,snapshot_id:snapshotId,strategy_id:strategyId,created_at:nowISO()};
+  const payload={...result,data_source:data.source,data_fetched_at:data.fetched_at,snapshot_id:snapshotId,strategy_id:strategyId,created_at:nowISO()};
   const id=await saveArtifact(db,user,'backtest',c.name,payload);
   return {ok:true,id,...payload};
 }
 async function buildPlan(env,db,user,input){
   const report=await artifact(db,input.backtest_id,'backtest'),r=report.payload,c=r.config;
   const [ctx,quote]=await Promise.all([accountContext(env),snapshotQuote(env,c.symbol)]);
-  requireValue((Date.parse(ctx.clock.timestamp)-Date.parse(r.signal_timestamp))/86400000<=7,'回测信号超过 7 天，请重新拉取历史数据',409,'STALE_SIGNAL');
+  const age=Date.parse(ctx.clock.timestamp)-Date.parse(r.signal_timestamp);
+  requireValue(age>=0&&age<=(isIntraday(c.type)?5*60000:7*86400000),isIntraday(c.type)?'分钟信号超过 5 分钟，请重新拉取行情':'回测信号超过 7 天，请重新拉取历史数据',409,'STALE_SIGNAL');
+  if(isIntraday(c.type))requireValue(ctx.clock.is_open,'分钟策略仅在开市时生成模拟订单',409,'MARKET_CLOSED');
   const reference=Number(quote.ap)>0&&Number(quote.bp)>0?(Number(quote.ap)+Number(quote.bp))/2:Number(quote.reference);
   requireValue(reference>0&&Number.isFinite(reference),'无法获取计划参考价',503);
-  const position=ctx.positions.find(p=>p.symbol===c.symbol),current=Number(position?.qty||0),target=Math.floor(Number(ctx.account.equity)*c.allocation*r.signal/reference),delta=target-current;
+  const position=ctx.positions.find(p=>p.symbol===c.symbol),current=Number(position?.qty||0),target=Math.floor((isIntraday(c.type)?c.budget:Number(ctx.account.equity)*c.allocation)*r.signal/reference),delta=target-current;
   const payload={backtest_id:input.backtest_id,strategy_id:r.strategy_id,snapshot_id:r.snapshot_id,signal_timestamp:r.signal_timestamp,signal:r.signal,symbol:c.symbol,current_qty:current,target_qty:target,delta,reference,created_at:nowISO(),expires_at:new Date(Date.now()+300000).toISOString(),order:Math.abs(delta)>=1?{symbol:c.symbol,side:delta>0?'buy':'sell',qty:Math.floor(Math.abs(delta)),type:'limit',limit_price:reference.toFixed(2),time_in_force:'day'}:null,notes:'计划仅调整所选标的；不会清仓其他持仓。超过限额时请降低策略仓位重新回测。提交时重新校验行情、账户和风控。'};
   const id=await saveArtifact(db,user,'plan',c.name,payload);return {ok:true,id,...payload};
 }
@@ -249,7 +259,7 @@ async function inspectAcceptance(env,db,user,id){
     const clientId='qs_'+key.replaceAll('-',''),local=await first(db,'SELECT * FROM orders WHERE client_id=?',clientId);
     if(!local)return null;
     const found=await findOrder(env,clientId);
-    if(found)return saveBrokerOrder(db,local,found,user.id,'acceptance_order_observed');
+    if(found)return saveBrokerOrder(env,db,local,found,user.id,'acceptance_order_observed');
     return {client_order_id:clientId,status:'unknown',filled_qty:null,filled_avg_price:null};
   }
   const fill=await receipt(id),cancel=await receipt(saved.cancel_key),reconciliation=await reconcile(env,db,user),ctx=await accountContext(env);
@@ -278,13 +288,13 @@ async function overview(env,db){
   out.positions=out.positions?.map(p=>pick(p,['symbol','qty','side','avg_entry_price','current_price','market_value','unrealized_pl','unrealized_plpc']))||null;
   out.orders=out.orders?.map(cleanOrder)||null;
   const local=await all(db,'SELECT client_id,status,broker_id,payload,broker_data,error,created_at,updated_at FROM orders ORDER BY created_at DESC LIMIT 100');
-  return {ok:Object.keys(errors).length===0,fetched_at:nowISO(),...out,control:publicControl(c),local_orders:local.map(r=>({...r,payload:JSON.parse(r.payload),broker_data:r.broker_data?JSON.parse(r.broker_data):null})),errors,source:'Alpaca Paper / IEX',refresh_seconds:15};
+  return {ok:Object.keys(errors).length===0,fetched_at:nowISO(),...out,control:publicControl(c),local_orders:local.map(r=>({...r,payload:JSON.parse(r.payload),broker_data:r.broker_data?JSON.parse(r.broker_data):null})),errors,source:env.DEMO_MODE==='local-fixture'?'本地券商替身 / 历史行情快照':'Alpaca Paper / IEX',demo_mode:env.DEMO_MODE==='local-fixture',refresh_seconds:15};
 }
 async function route(request,env){
   const url=new URL(request.url),path=url.pathname,method=request.method;
   if(!path.startsWith('/api/')){
     requireValue(method==='GET'||method==='HEAD','Method not allowed',405);
-    const asset={'/':[PAGE,'text/html'],'/index.html':[PAGE,'text/html'],'/styles.css':[CSS,'text/css'],'/app.js':[CLIENT,'text/javascript'],'/research-baseline.json':[FROZEN,'application/json']}[path];
+    const asset={'/':[PAGE,'text/html'],'/index.html':[PAGE,'text/html'],'/styles.css':[CSS,'text/css'],'/app.js':[CLIENT,'text/javascript'],'/research-baseline.json':[FROZEN,'application/json'],'/library-demo.json':[LIBRARY_DEMO,'application/json']}[path];
     if(!asset)return new Response('Not found',{status:404});
     return new Response(method==='HEAD'?null:asset[0],{headers:{'content-type':asset[1]+'; charset=utf-8','cache-control':'no-cache','content-security-policy':"default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",'x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});
   }
@@ -297,7 +307,7 @@ async function route(request,env){
     if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
     if(path==='/api/v1/equity'){const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
     if(path==='/api/v1/market'){const sym=symbol(url.searchParams.get('symbol'));return json({ok:true,symbol:sym,source:'Alpaca IEX',fetched_at:nowISO(),snapshot:await snapshotQuote(env,sym)});}
-    if(path==='/api/v1/catalog')return json({ok:true,symbols:SYMBOLS,engine:ENGINE_VERSION,templates:[{type:'sma',name:'双均线趋势',description:'快均线高于慢均线时持有目标仓位，否则空仓。'},{type:'momentum',name:'绝对动量',description:'慢周期累计收益为正时持有目标仓位，否则空仓。'},{type:'buy_hold',name:'买入持有基准',description:'始终保持首次买入的目标仓位，用于同区间比较。'}]});
+    if(path==='/api/v1/catalog')return json({ok:true,symbols:SYMBOLS,intraday_symbols:INTRADAY_SYMBOLS,engine:ENGINE_VERSION,templates:[{type:'opening_range_breakout',name:'开盘区间突破',timeframe:'1Min',description:'美股开盘观察区间结束后，收盘价突破区间上沿买入；跌破区间中点或 15:45 后卖出。'},{type:'vwap_reversion',name:'VWAP 均值回归',timeframe:'1Min',description:'当日价格低于 VWAP 指定幅度买入；回到 VWAP 或 15:45 后卖出。'},{type:'sma',name:'双均线趋势',timeframe:'1Day',description:'快均线高于慢均线时持有目标仓位，否则空仓。'},{type:'momentum',name:'绝对动量',timeframe:'1Day',description:'慢周期累计收益为正时持有目标仓位，否则空仓。'},{type:'buy_hold',name:'买入持有基准',timeframe:'1Day',description:'始终保持首次买入的目标仓位，用于同区间比较。'}]});
     if(path==='/api/v1/artifacts'){const kind=url.searchParams.get('kind')||'backtest';requireValue(['backtest','strategy','dataset','plan','acceptance'].includes(kind),'类别无效');return json({ok:true,items:await all(db,'SELECT id,kind,name,created_at FROM artifacts WHERE kind=? ORDER BY created_at DESC LIMIT 50',kind)});}
     if(path==='/api/v1/acceptance/report')return json(await acceptanceReport(db,url.searchParams.get('id')));
     if(path==='/api/v1/artifact'){return json({ok:true,...await artifact(db,url.searchParams.get('id'),url.searchParams.get('kind'))});}

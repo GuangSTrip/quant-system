@@ -1,6 +1,7 @@
 import {cp,mkdir,rm} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
+import './build-library-demo.mjs';
 import './bundle.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url)),dist=resolve(root,'dist');
 await rm(dist,{recursive:true,force:true});
