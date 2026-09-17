@@ -11,7 +11,15 @@ from quant_system.backtest import Backtester
 from quant_system.benchmarking import BenchmarkRunner
 from quant_system.broker import AlpacaPaperBroker, Order, OrderStatus, PaperBroker
 from quant_system.config import CostConfig, PaperTradingConfig, RiskConfig, SystemConfig, load_config
-from quant_system.data import align_panel, data_quality_report, generate_synthetic_data, validate_bars
+from quant_system.cli import _validation_exit_code
+from quant_system.data import (
+    align_panel,
+    data_quality_report,
+    generate_synthetic_data,
+    load_data,
+    load_yahoo_wide_csv,
+    validate_bars,
+)
 from quant_system.dashboard import DashboardStore, serve_dashboard
 from quant_system.performance import (
     calculate_metrics,
@@ -37,6 +45,21 @@ class AlwaysLongStrategy(Strategy):
 
 
 class QuantSystemTests(unittest.TestCase):
+    def test_failed_profitability_gate_returns_nonzero_exit_code(self):
+        self.assertEqual(
+            _validation_exit_code(
+                {"holdout_profitable": True, "positive_after_cost_stress": True}
+            ),
+            0,
+        )
+        self.assertEqual(
+            _validation_exit_code(
+                {"holdout_profitable": True, "positive_after_cost_stress": False}
+            ),
+            2,
+        )
+        self.assertEqual(_validation_exit_code({}), 2)
+
     def test_close_signal_executes_on_next_bar_open(self):
         data = generate_synthetic_data(["AAA"], periods=4, seed=9)
         config = SystemConfig.from_dict(
@@ -157,6 +180,12 @@ class QuantSystemTests(unittest.TestCase):
         self.assertEqual(len(config.strategy.sleeves), 2)
         self.assertTrue(config.strategy.params["adaptive"])
 
+    def test_low_frequency_config_loads(self):
+        config = load_config("configs/low_frequency_etf.yaml")
+        self.assertEqual(config.strategy.name, "multi_horizon_trend")
+        self.assertEqual(config.data["type"], "yahoo_wide_csv")
+        self.assertEqual(len(config.data["symbols"]), 6)
+
     def test_alpaca_paper_template_is_safe_by_default(self):
         config = load_config("configs/alpaca_paper.yaml")
         self.assertFalse(config.paper_trading.enabled)
@@ -172,6 +201,51 @@ class QuantSystemTests(unittest.TestCase):
         report = data_quality_report(data)
         self.assertEqual(report["symbols"], 2)
         self.assertEqual(set(report["symbol_details"]), {"AAA", "BBB"})
+
+    def test_yahoo_wide_snapshot_is_adjusted_and_filterable(self):
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        columns = pd.MultiIndex.from_tuples(
+            [
+                (field, symbol)
+                for field in ("Adj Close", "Close", "High", "Low", "Open", "Volume")
+                for symbol in ("AAA", "BBB")
+            ]
+        )
+        wide = pd.DataFrame(index=dates, columns=columns, dtype=float)
+        wide.index.name = "Date"
+        for symbol in ("AAA", "BBB"):
+            wide[("Close", symbol)] = [100.0, 102.0]
+            wide[("Adj Close", symbol)] = [50.0, 51.0]
+            wide[("Open", symbol)] = [98.0, 101.0]
+            wide[("High", symbol)] = [103.0, 104.0]
+            wide[("Low", symbol)] = [97.0, 100.0]
+            wide[("Volume", symbol)] = [1_000_000, 1_100_000]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "wide.csv"
+            wide.to_csv(path)
+            bars = load_yahoo_wide_csv(str(path))
+            self.assertEqual(len(bars), 4)
+            self.assertAlmostEqual(float(bars.iloc[0]["close"]), 50.0)
+            self.assertAlmostEqual(float(bars.iloc[0]["open"]), 49.0)
+            filtered = load_data(
+                {
+                    "type": "yahoo_wide_csv",
+                    "path": str(path),
+                    "symbols": ["BBB"],
+                    "start": "2024-01-03",
+                    "panel_alignment": "intersection",
+                }
+            )
+            self.assertEqual(filtered["symbol"].unique().tolist(), ["BBB"])
+            self.assertEqual(len(filtered), 1)
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                load_data(
+                    {
+                        "type": "yahoo_wide_csv",
+                        "path": str(path),
+                        "sha256": "0" * 64,
+                    }
+                )
 
     def test_paper_broker_partial_fill_lifecycle(self):
         bars = generate_synthetic_data(["AAA"], periods=2)
@@ -308,6 +382,8 @@ class QuantSystemTests(unittest.TestCase):
         )
         result = BenchmarkRunner(config).run(data)
         self.assertEqual(int(result.comparison["selected_on_development"].sum()), 1)
+        self.assertIn("sma_cross_50_200", set(result.comparison["strategy"]))
+        self.assertIn("cross_sectional_momentum", set(result.comparison["strategy"]))
         self.assertEqual(len(result.cost_stress), 4)
         self.assertIn("deflated_sharpe_ratio", result.selection_statistics)
 

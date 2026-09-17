@@ -27,6 +27,11 @@ def _percent(value: float) -> str:
     return "%8.2f%%" % (value * 100.0)
 
 
+def _validation_exit_code(gates) -> int:
+    """Make failed research gates visible to scripts and CI."""
+    return 0 if gates and all(gates.values()) else 2
+
+
 def run(config_path: str, output_dir: str) -> int:
     config = load_config(config_path)
     market_data = load_data(config.data)
@@ -59,7 +64,11 @@ def run_research(config_path: str, output_dir: str) -> int:
     print("  holdout return  : %s" % _percent(result.holdout_metrics["total_return"]))
     print("  holdout Sharpe  : %8.2f" % result.holdout_metrics["sharpe_ratio"])
     print("  holdout drawdown: %s" % _percent(result.holdout_metrics["max_drawdown"]))
-    return 0
+    failed = [name for name, passed in result.validation_gate.items() if not passed]
+    print("  validation      : %s" % ("PASS" if not failed else "FAIL"))
+    if failed:
+        print("  failed gates    : %s" % ", ".join(failed))
+    return _validation_exit_code(result.validation_gate)
 
 
 def run_benchmark(config_path: str, output_dir: str) -> int:
@@ -68,11 +77,20 @@ def run_benchmark(config_path: str, output_dir: str) -> int:
     result = BenchmarkRunner(config).run(market_data)
     result.save(output_dir)
     _save_run_context(output_dir, config_path, config, market_data)
-    best = result.comparison.iloc[0]
+    selected = result.comparison.loc[
+        result.comparison["selected_on_development"]
+    ].iloc[0]
+    gates = result.selection_statistics["validation_gates"]
+    failed = [name for name, passed in gates.items() if not passed]
     print("Benchmark complete: %s" % Path(output_dir).resolve())
-    print("  best strategy: %s" % best["strategy"])
-    print("  best Sharpe  : %8.2f" % best["sharpe_ratio"])
-    return 0
+    print("  selected strategy: %s" % selected["strategy"])
+    print("  holdout CAGR     : %s" % _percent(selected["holdout_cagr"]))
+    print("  holdout Sharpe   : %8.2f" % selected["holdout_sharpe_ratio"])
+    print("  holdout drawdown : %s" % _percent(selected["holdout_max_drawdown"]))
+    print("  validation       : %s" % ("PASS" if not failed else "FAIL"))
+    if failed:
+        print("  failed gates     : %s" % ", ".join(failed))
+    return _validation_exit_code(gates)
 
 
 def run_paper_status(config_path: str) -> int:

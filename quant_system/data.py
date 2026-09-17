@@ -1,14 +1,14 @@
 """Market-data loading, validation, and deterministic demo generation."""
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
-import json
-from urllib.request import Request
 
 
 REQUIRED_COLUMNS = ("timestamp", "symbol", "open", "high", "low", "close", "volume")
@@ -71,6 +71,83 @@ def data_quality_report(frame: pd.DataFrame) -> Dict[str, Any]:
 def load_csv(path: str) -> pd.DataFrame:
     """Load long-form OHLCV bars from CSV."""
     return validate_bars(pd.read_csv(Path(path)))
+
+
+def verify_file_sha256(path: str, expected_sha256: str) -> None:
+    """Reject a local snapshot when it does not match its frozen checksum."""
+    digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    if digest.lower() != expected_sha256.lower():
+        raise ValueError(
+            "Market-data checksum mismatch for %s: expected %s, got %s"
+            % (path, expected_sha256, digest)
+        )
+
+
+def load_yahoo_wide_csv(path: str) -> pd.DataFrame:
+    """Load a two-level yfinance CSV and return adjusted long-form OHLCV bars.
+
+    ``yfinance.download`` writes fields on the first header row and tickers on
+    the second.  OHLC values are multiplied by Adj Close / Close so prices are
+    continuous across distributions and splits; volume is left unchanged.
+    """
+    source = Path(path)
+    wide = pd.read_csv(source, header=[0, 1], index_col=0)
+    if not isinstance(wide.columns, pd.MultiIndex):
+        raise ValueError("Yahoo wide CSV must have field and ticker header rows")
+
+    fields = {str(value).strip() for value in wide.columns.get_level_values(0)}
+    required = {"Adj Close", "Close", "Open", "High", "Low", "Volume"}
+    missing = required - fields
+    if missing:
+        raise ValueError("Yahoo wide CSV is missing fields: %s" % sorted(missing))
+
+    timestamps = pd.to_datetime(wide.index, errors="coerce")
+    frames = []
+    symbols = sorted(
+        {
+            str(value).strip().upper()
+            for field, value in wide.columns
+            if str(field).strip() in required and str(value).strip()
+        }
+    )
+    for symbol in symbols:
+        columns = {}
+        for field in required:
+            key = (field, symbol)
+            if key not in wide.columns:
+                raise ValueError("Yahoo wide CSV is missing %s for %s" % (field, symbol))
+            columns[field] = pd.to_numeric(wide[key], errors="coerce").to_numpy(dtype=float)
+        factor = np.divide(
+            columns["Adj Close"],
+            columns["Close"],
+            out=np.full(len(wide), np.nan),
+            where=np.isfinite(columns["Close"]) & (columns["Close"] != 0),
+        )
+        adjusted_open = columns["Open"] * factor
+        adjusted_close = columns["Adj Close"]
+        # Independent floating-point multiplication can put an adjusted high
+        # below close (or low above it) by ~1e-14. Preserve the price envelope.
+        adjusted_high = np.maximum.reduce(
+            [columns["High"] * factor, adjusted_open, adjusted_close]
+        )
+        adjusted_low = np.minimum.reduce(
+            [columns["Low"] * factor, adjusted_open, adjusted_close]
+        )
+        frame = pd.DataFrame(
+            {
+                "timestamp": timestamps,
+                "symbol": symbol,
+                "open": adjusted_open,
+                "high": adjusted_high,
+                "low": adjusted_low,
+                "close": adjusted_close,
+                "volume": columns["Volume"],
+            }
+        ).dropna()
+        frames.append(frame)
+    if not frames:
+        raise ValueError("Yahoo wide CSV contains no ticker data")
+    return validate_bars(pd.concat(frames, ignore_index=True))
 
 
 def align_panel(frame: pd.DataFrame, method: str = "union") -> pd.DataFrame:
@@ -251,6 +328,27 @@ def load_data(config: Dict[str, Any]) -> pd.DataFrame:
         if not path:
             raise ValueError("data.path is required for CSV data")
         return load_csv(path)
+    if source_type == "yahoo_wide_csv":
+        path = config.get("path")
+        if not path:
+            raise ValueError("data.path is required for yahoo_wide_csv data")
+        expected_sha256 = config.get("sha256")
+        if expected_sha256:
+            verify_file_sha256(path, str(expected_sha256))
+        frame = load_yahoo_wide_csv(path)
+        requested = [str(symbol).upper() for symbol in config.get("symbols", [])]
+        if requested:
+            missing = sorted(set(requested) - set(frame["symbol"].unique()))
+            if missing:
+                raise ValueError("Yahoo wide CSV is missing configured symbols: %s" % missing)
+            frame = frame.loc[frame["symbol"].isin(requested)].copy()
+        if config.get("start"):
+            frame = frame.loc[frame["timestamp"] >= pd.Timestamp(config["start"])].copy()
+        if config.get("end"):
+            frame = frame.loc[frame["timestamp"] <= pd.Timestamp(config["end"])].copy()
+        if frame.empty:
+            raise ValueError("No yahoo_wide_csv rows remain after symbol/date filtering")
+        return align_panel(frame, config.get("panel_alignment", "union"))
     if source_type == "synthetic":
         return finish(generate_synthetic_data(
             symbols=config.get("symbols", ["AAA", "BBB", "CCC"]),

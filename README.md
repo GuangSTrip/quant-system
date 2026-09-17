@@ -20,7 +20,7 @@ npm test
 npm run validate
 ```
 
-网页测试要求 Node.js 24。历史验证为 Python 29 项及网页 47 项；自动策略新增后的完整结果见当前提交的 GitHub Actions。另通过真实 Workerd 传输与密码认证兼容性回归。已修复造成全部账户接口同时报超时的 Workers 请求参数不兼容，生产日志确认账户／时钟／持仓／订单／行情／净值历史读取成功。
+网页测试要求 Node.js 24。当前低频整合后的 Python 测试为 32 项；网页测试与自动策略的完整结果见当前提交的 GitHub Actions。另通过真实 Workerd 传输与密码认证兼容性回归。已修复造成全部账户接口同时报超时的 Workers 请求参数不兼容，生产日志确认账户／时钟／持仓／订单／行情／净值历史读取成功。
 
 「交付验收」页面可实际提交 1 股成交验证单和独立撤单测试单，保存九项检查及券商原始回报，并导出汇报文档。完整成交结论只在收到实际成交、撤单和持仓／账户对账证据后给出。本次尚未取得实际成交回报；模拟券商响应测试不等于在线账户成交证明。详见 [在线验证记录](web_platform/ONLINE_VERIFICATION.md)。
 
@@ -37,7 +37,7 @@ npm run validate
 | 账户 | 逐日盯市、现金利息、融券成本、持仓/敞口/权益/回撤记录 |
 | 分析 | CAGR、Sharpe、Sortino、Calmar、VaR、ES、Ulcer、Alpha/Beta、信息比率、基准与成本 |
 | 研究 | 参数网格、稳健评分、70/30 留出集、扩展式 walk-forward、区块 Bootstrap、1–5 倍成本压力 |
-| 基准 | 9 个公开强基线、开发/留出策略选择、市场阶段、消融、折损 Sharpe 与成本压力 |
+| 基准 | 12 个低频候选、开发/留出策略选择、市场阶段、消融、折损 Sharpe 与成本压力 |
 | 交易边界 | 订单状态机、部分成交、撤单、PaperBroker、Alpaca Paper Trading 适配器；真实 Broker 留作显式适配器 |
 | 可追溯 | 配置快照、运行环境、数据质量报告、参数榜单、持仓、成交和 Markdown 报告 |
 
@@ -65,6 +65,15 @@ python3 -m unittest discover -s tests -v
 python3 -m quant_system --benchmark \
   --config configs/sota_benchmark.yaml \
   --output reports/sota_benchmark
+
+# 准备固定 ETF 历史快照并运行低频策略全集
+python3 scripts/prepare_low_frequency_data.py
+python3 -m quant_system \
+  --config configs/low_frequency_etf.yaml \
+  --output reports/low_frequency_etf
+python3 -m quant_system --benchmark \
+  --config configs/low_frequency_etf.yaml \
+  --output reports/low_frequency_benchmark
 
 # 当前开发集选中的稳健生产候选（仍然是模拟盘）
 python3 -m quant_system \
@@ -129,6 +138,9 @@ timestamp,symbol,open,high,low,close,volume
 6. 实盘从小资金开始，设置独立于策略进程的券商侧限额和人工 kill switch。
 
 详细设计与实盘边界见 [系统架构](docs/ARCHITECTURE.md)、[验证规范](docs/VALIDATION.md) 和 [实盘上线清单](docs/LIVE_TRADING.md)。
+低频策略清单、固定 ETF 池、历史快照来源与运行方式见
+[低频策略与历史数据](docs/LOW_FREQUENCY_STRATEGIES.md)；下一位 Codex 的复现顺序、
+冻结结果和剩余任务见 [低频 Codex 交接](docs/NEXT_LOW_FREQUENCY_CODEX_HANDOFF.md)。
 
 ## Alpaca 模拟盘
 

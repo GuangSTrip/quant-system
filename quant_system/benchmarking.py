@@ -24,6 +24,7 @@ from .strategies import (
     MultiHorizonTrendStrategy,
     OnlineExpertEnsembleStrategy,
     RollingRiskParityStrategy,
+    SmaCrossStrategy,
     TrendFollowingStrategy,
 )
 
@@ -157,11 +158,19 @@ class BenchmarkRunner:
             )
         return {
             "equal_weight": EqualWeightStrategy(0.95),
+            "sma_cross_50_200": SmaCrossStrategy(50, 200, 0.95),
             "risk_parity": RollingRiskParityStrategy(
                 63, 0.95, 21, method="equal_risk_contribution"
             ),
             "single_horizon_trend": TrendFollowingStrategy(84, 168, 40, 0.95, 5),
             "multi_horizon_trend": multi(),
+            "cross_sectional_momentum": CrossSectionalMomentumStrategy(
+                lookback=126,
+                skip=5,
+                top_k=min(3, max(1, len(offensive))),
+                allocation=0.95,
+                rebalance_interval=21,
+            ),
             "long_short_multi_horizon": long_short_multi(),
             "dual_momentum": DualMomentumStrategy(
                 offensive, defensive, 252, 5, 3, 0.95, 21

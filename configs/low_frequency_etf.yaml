@@ -1,0 +1,60 @@
+# Frozen, offline-replayable daily ETF research configuration.
+engine:
+  initial_cash: 1000000
+  allow_fractional: false
+  rebalance_threshold: 0.01
+  cash_buffer: 0.02
+
+costs:
+  commission_rate: 0.0003
+  minimum_commission: 0
+  slippage_bps: 2
+  spread_bps: 1
+  market_impact: 0.10
+  sell_tax_rate: 0
+  annual_cash_rate: 0.0
+
+risk:
+  max_position_weight: 0.35
+  max_gross_leverage: 0.95
+  max_group_weight: 0.70
+  max_drawdown: 0.18
+  drawdown_cooldown_days: 20
+  allow_short: false
+  target_volatility: 0.12
+  volatility_lookback: 60
+  fast_volatility_lookback: 20
+  min_volatility_scale: 0.25
+  max_volatility_scale: 1.0
+  max_daily_turnover: 0.35
+  max_volume_participation: 0.03
+  drawdown_soft_limit: 0.08
+  minimum_drawdown_scale: 0.50
+  asset_groups:
+    SPY: equity
+    QQQ: equity
+    TLT: rates
+    GLD: inflation
+    VNQ: real_estate
+    DBC: inflation
+
+strategy:
+  # Selected only on the first 70% development period by --benchmark.
+  name: multi_horizon_trend
+  params:
+    horizons: [21, 63, 126, 252]
+    volatility_window: 40
+    allocation: 0.95
+    rebalance_interval: 5
+    long_short: false
+    signal_scale: 0.75
+    target_smoothing: 0.35
+
+data:
+  type: yahoo_wide_csv
+  path: data/low_frequency_etfs_raw.csv
+  sha256: 8fe8d4ccf9d0fa9660b898d88c510ac71505b0907a6cef37989d3c0dc8fed8c5
+  symbols: [SPY, QQQ, TLT, GLD, VNQ, DBC]
+  start: "2018-01-02"
+  end: "2026-05-29"
+  panel_alignment: intersection
