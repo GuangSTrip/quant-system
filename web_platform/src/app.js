@@ -1,9 +1,10 @@
+import {createLongbridgePanel} from './longbridge-ui.mjs';
 import {createStrategyLab} from './strategy-lab.mjs';
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
   const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false};
-  const names = {hk:'港股模拟账户',showcase:'成果演示',library:'三市场策略库',overview:'账户总览',strategy:'策略讲解',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
+  const names = {longbridge:'港股 · 长桥',hk:'港股模拟账户',showcase:'成果演示',library:'三市场策略库',overview:'账户总览',strategy:'策略讲解',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const types = {limit:'限价',market:'市价',stop:'止损市价',stop_limit:'止损限价'};
@@ -26,7 +27,9 @@ import {createStrategyLab} from './strategy-lab.mjs';
     let data;try{data=await response.json();}catch{throw new Error('服务器返回了无法识别的结果，请刷新后查看订单状态。');}
     if(!response.ok){if(response.status===401&&path!=='session'&&path!=='auth/login')await loadSession();const e=new Error(data.error||'请求失败');e.code=data.code;throw e;}return data;
   }
+  const longbridgePanel=createLongbridgePanel(api);
   function showView(view){
+    if(view==='longbridge')longbridgePanel.status();
     if(view==='automation')loadAutomation();
     if(!names[view])view='showcase';
     document.querySelectorAll('.view').forEach(e=>{e.hidden=e.id!=='view-'+view;});
@@ -40,6 +43,7 @@ import {createStrategyLab} from './strategy-lab.mjs';
   async function loadSession(){
     try{state.session=await api('session');text('identity-label',state.session.operator?state.session.username+' · 操作员已登录':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
     catch(e){state.session=null;text('identity-label','身份服务暂不可用');message('global-error',e.message,true);$('operator-notice').hidden=false;}
+    if(!state.session?.operator)longbridgePanel.clear();
     syncAccess();
   }
   function chart(id,points,series,format=money,markers=[]){

@@ -1,3 +1,4 @@
+import {connectionStatus,saveConnection,removeConnection,connectionOverview} from './longbridge.mjs';
 import {hkOverview} from './hk.mjs';
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,INTRADAY_SYMBOLS,strategyConfig,isIntraday,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
 import {PAGE,CSS,CLIENT,FROZEN,LIBRARY_DEMO} from './assets.mjs';
@@ -303,6 +304,8 @@ async function route(request,env){
   const db=database(env);
   if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);await verifyScheduler(request,env);const result=await auto.tick(env,db,'github');console.info(JSON.stringify({event:'scheduler_tick',source:'github',at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
   if(method==='GET'){
+    if(path==='/api/v1/longbridge/status'){await operator(request,env,db);return json(await connectionStatus(env,db));}
+    if(path==='/api/v1/longbridge/overview'){await operator(request,env,db);return json(await connectionOverview(env,db));}
     if(path==='/api/v1/hk/overview'){await operator(request,env,db);return json(await hkOverview(env,url.searchParams.get('symbol')||'HK.00700'));}
     if(path==='/api/v1/automation'){await operator(request,env,db);return json(await auto.status(db,env));}
     if(path==='/api/v1/session'){const u=await identity(request,env,db);return json({ok:true,signed_in:u.signed_in,operator:u.operator,username:u.username,expires_at:u.expires_at,auth_mode:'password',login_enabled:Boolean(env.AUTH_USERNAME&&env.AUTH_PASSWORD_RECORD)});}
@@ -324,6 +327,8 @@ async function route(request,env){
   if(path==='/api/v1/auth/login'){const result=await login(request,env,db,input,auditStatement);return json(result.body,200,result.headers);}
   if(path==='/api/v1/auth/logout'){const result=await logout(request,env,db,auditStatement);return json(result.body,200,result.headers);}
   const user=await operator(request,env,db);
+  if(path==='/api/v1/longbridge/connect')return json(await saveConnection(env,db,user,input,auditStatement));
+  if(path==='/api/v1/longbridge/disconnect'){requireValue(input.confirm===true,'请确认移除长桥连接');return json(await removeConnection(db,user,auditStatement));}
   if(path==='/api/v1/automation/start')return json(await auto.configure(env,db,user,input));
   if(path==='/api/v1/automation/resume')return json(await auto.resume(env,db,user,input));
   if(path==='/api/v1/automation/pause'){if(input.cancel)return json(await auto.cancelRun(env,db,user));await auto.pause(db,user);return json(await auto.status(db,env));}

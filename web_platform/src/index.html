@@ -4,6 +4,7 @@
 <div class="app-shell">
   <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>课程交易平台</small></span></a>
     <nav aria-label="主导航">
+      <button data-view="longbridge" class="nav">港 <span>港股 · 长桥</span></button>
       <button data-view="hk" class="nav">港 <span>港股模拟账户</span></button>
       <button data-view="showcase" class="nav active">00 <span>成果演示</span></button>
       <button data-view="library" class="nav">库 <span>三市场策略库</span></button>
@@ -40,7 +41,21 @@
       <article class="panel"><p class="eyebrow">LOW-FREQUENCY EXTENSION</p><h2>低频策略接入位置</h2><p class="caption">低频组员可提交同一报告字段：市场、标的、策略名、数据来源、时间范围、成本、逐笔交易及净值。低频计算和交易授权仍由其独立实现。</p></article>
     </section>
 
-    <section id="view-hk" class="view" hidden>
+    <section id="view-longbridge" class="view" hidden><div class="panel">
+<div class="panel-head"><h2>长桥港股模拟账户</h2><button id="lb-refresh" type="button">刷新账户 / 检查连接</button></div>
+<p>使用长桥开发者中心的模拟账户凭证连接，无需安装 OpenD。此处先完成账户连接与核对，下单和自动交易尚未启用。</p>
+<p id="lb-status" class="notice" role="status">请登录课程账号后连接。</p>
+<div id="lb-settings" hidden><details open><summary>配置或更换模拟账户</summary>
+<p>此网站共享一个课程账户。凭证仅在服务器加密保存，不会回显；课程操作员可查询已连接账户。</p>
+<form id="lb-form" autocomplete="off"><div class="stack">
+<label>App Key<input id="lb-key" type="password" autocomplete="new-password" minlength="8" maxlength="512" required></label>
+<label>App Secret<input id="lb-secret" type="password" autocomplete="new-password" minlength="8" maxlength="512" required></label>
+<label>模拟账户 Access Token<input id="lb-token" type="password" autocomplete="new-password" minlength="8" maxlength="8192" required></label>
+<label><input id="lb-paper" type="checkbox" required>我确认三项凭证来自同一应用，Access Token 属于模拟账户。</label>
+</div><div class="actions"><button id="lb-save" class="primary" type="submit">验证连接并保存</button><button id="lb-remove" type="button" disabled>移除已保存连接</button></div></form>
+</details><p class="caption">成功读取资金仅证明凭证可用，尚不证明账户环境；请与开发者中心的模拟账户核对。当前连接不允许提交订单。</p></div>
+<div id="lb-results"></div></div></section>
+<section id="view-hk" class="view" hidden>
 <div class="panel"><h2>港股模拟账户 · 富途</h2><p>当前接入阶段：查询模拟资金、持仓、订单和港股报价。下单与自动执行尚未开放；这里不使用策略库的合成数据。</p>
 <form id="hk-form" class="actions"><label>港股代码<input id="hk-symbol" value="HK.00700" maxlength="10" required></label><button id="hk-refresh" type="submit">查询富途模拟账户</button></form>
 <p id="hk-status" role="status">登录后点击查询。未配置网关时会显示明确提示。</p><div id="hk-result"></div>

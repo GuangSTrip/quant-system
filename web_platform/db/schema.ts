@@ -48,3 +48,7 @@ export const autoCycles=sqliteTable('auto_cycles',{
   id:integer('id').primaryKey({autoIncrement:true}),runId:text('run_id'),source:text('source').notNull(),outcome:text('outcome').notNull(),
   details:text('details').notNull(),createdAt:text('created_at').notNull()
 });
+
+export const longbridgeConnection=sqliteTable('longbridge_connection',{
+  id:integer('id').primaryKey(),ciphertext:text('ciphertext').notNull(),updatedAt:text('updated_at').notNull(),actor:text('actor').notNull()
+});
