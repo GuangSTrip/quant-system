@@ -9,3 +9,5 @@ data/*
 !data/.gitkeep
 .paper_state/
 *.jsonl
+web_platform/daily-preview.*.log
+web_platform/demo-*.log

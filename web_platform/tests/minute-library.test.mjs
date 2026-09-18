@@ -35,3 +35,15 @@ test('the saved real short sample reproduces its research result',()=>{
   const rerun=runMinuteResearch(raw.bars,{market:'US',symbol:'SPY',type:'opening_range',budget:2000});
   assert.equal(rerun.net,report.net);assert.deepEqual(rerun.orders,report.orders);
 });
+test('advanced candidate uses the same causal execution and survives cost stress',()=>{
+  const raw=JSON.parse(readFileSync(new URL('../demo-data/SPY-1Min-snapshot.json',import.meta.url),'utf8'));
+  const basic=runMinuteResearch(raw.bars,{market:'US',symbol:'SPY',type:'volume_vwap_breakout',budget:2000});
+  const stressed=runMinuteResearch(raw.bars,{market:'US',symbol:'SPY',type:'volume_vwap_breakout',budget:2000,costMultiplier:2});
+  assert.equal(basic.days,5);
+  assert.equal(stressed.costBps,20);
+  assert.ok(stressed.net<=basic.net);
+  for(const order of basic.orders.filter(x=>x.reason.includes('强制平仓'))){
+    const bar=raw.bars.find(x=>x.t===order.t);
+    assert.equal(order.price,bar.o);
+  }
+});

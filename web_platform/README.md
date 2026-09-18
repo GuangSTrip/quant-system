@@ -16,6 +16,10 @@
 
 ## 课堂操作
 
+日线研究本地入口：在 `web_platform` 目录运行 `npm run build`，再设置 `QUANT_DEMO_PORT=8765` 并运行 `node scripts/demo.mjs`；浏览器打开 `http://127.0.0.1:8765/#daily`。必须通过这个本地 HTTP 地址打开，直接双击 `src/index.html` 会使绝对路径的 CSS、脚本和报告文件无法加载。该演示的交易相关功能使用本地替身，日线研究不会提交模拟盘订单。
+
+当前日线页以 `src/daily-refinement.json` 和 `src/modular-daily-results.json` 展示三市场动态选股、买卖和仓位的历史回测，包含原有 144 组和新增 34 组试验。`src/current-daily-plan.json` 是较早的当日计划归档，不代表本轮候选已生成有效订单。最新交接见 [策略总结](../docs/STRATEGY_SUMMARY_2026-09-18.md)、[模拟盘接入](../docs/PAPER_INTEGRATION_HANDOFF_2026-09-18.md)、[低频策略](../docs/LOW_FREQUENCY_HANDOFF_2026-09-18.md)。
+
 本机成果演示可在构建后运行 `node scripts/demo.mjs`，打开 `http://127.0.0.1:8787/#showcase`。演示使用保存在 `demo-data/SPY-1Min-snapshot.json` 的 Yahoo Finance 公开历史分钟行情快照；可运行 `node scripts/fetch-demo-data.mjs` 更新快照。网页登录账号 `course_test`、密码 `fixture-only-password-123`。回测由同一策略引擎计算，买入和卖出由本地券商替身回放并标注历史信号时间；订单不会发送到 Alpaca。查看真实 Paper 账户与成交仍需正常部署和独立凭证。Yahoo Chart 为非正式公开接口，只用于这份可复现的课程样例，生产数据链路仍使用 Alpaca IEX。
 
 三市场分钟策略库见 `http://127.0.0.1:8787/#library`。`src/minute-library.mjs` 提供开盘区间突破、VWAP 均值回归和波动率自适应动量三个研究策略，按美股、港股、A股普通股票分别处理交易时段、整手与 A股 T+1；该模块不提交券商订单。`node scripts/build.mjs` 会生成 9 份静态演示报告：美股用已保存的 5 日 SPY 历史快照，港股与 A股用固定种子伪随机分钟样本（港股 seed 4107、A股 seed 6129）。重新构建能复现相同路径；合成样本的盈亏只用于检查计算和网页流程，不能作为策略表现证据。低频策略组员可沿用报告字段接入，分钟策略库不会修改现有 Python 日频研究。

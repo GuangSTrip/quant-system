@@ -1,9 +1,11 @@
 import {createStrategyLab} from './strategy-lab.mjs';
+import {createDailyWorkbench} from './daily-workbench.mjs';
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
+  const dailyWorkbench=createDailyWorkbench($('daily-workbench'),chart);
   const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false};
-  const names = {showcase:'成果演示',library:'三市场策略库',overview:'账户总览',strategy:'策略讲解',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
+  const names = {showcase:'成果演示',library:'分钟旧研究',daily:'日线策略研究',overview:'账户总览',strategy:'策略讲解',research:'策略与回测',trade:'模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const types = {limit:'限价',market:'市价',stop:'止损市价',stop_limit:'止损限价'};
@@ -29,6 +31,7 @@ import {createStrategyLab} from './strategy-lab.mjs';
   function showView(view){
     if(view==='automation')loadAutomation();
     if(!names[view])view='showcase';
+    document.body.dataset.currentView=view;
     document.querySelectorAll('.view').forEach(e=>{e.hidden=e.id!=='view-'+view;});
     document.querySelectorAll('[data-view]').forEach(e=>{e.classList.toggle('active',e.dataset.view===view);e.setAttribute('aria-current',e.dataset.view===view?'page':'false');});
     text('view-title',names[view]);if(location.hash!=='#'+view)history.replaceState(null,'','#'+view);
@@ -36,6 +39,7 @@ import {createStrategyLab} from './strategy-lab.mjs';
     if(view==='acceptance')loadAcceptanceHistory();
     if(view==='showcase'&&state.session)loadShowcase();
     if(view==='library')loadLibrary();
+    if(view==='daily'){dailyWorkbench.load();loadCurrentDailyPlan();}
   }
   async function loadSession(){
     try{state.session=await api('session');text('identity-label',state.session.operator?state.session.username+' · 操作员已登录':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
@@ -172,7 +176,37 @@ import {createStrategyLab} from './strategy-lab.mjs';
     }catch(error){text('library-warning','报告读取失败：'+error.message);}
   }
   $('library-market').addEventListener('change',loadLibrary);$('library-symbol').addEventListener('change',loadLibrary);$('library-strategy').addEventListener('change',loadLibrary);
-  function updateResearchFields(){const f=$('research-form').elements,minute=['opening_range_breakout','vwap_reversion'].includes(f.type.value);for(const kind of ['daily','minute'])for(const label of document.querySelectorAll('[data-research-'+kind+']')){const active=(kind==='minute')===minute;label.hidden=!active;label.querySelector('input').disabled=!active;label.querySelector('input').required=active;}for(const option of f.symbol.options)option.disabled=minute&&!minuteSymbols.has(option.value);if(f.symbol.selectedOptions[0]?.disabled)f.symbol.value='SPY';f.days.min=minute?'2':'90';f.days.max=minute?'30':'1095';if(Number(f.days.value)<Number(f.days.min)||Number(f.days.value)>Number(f.days.max))f.days.value=minute?'5':'365';text('research-message',minute?'分钟策略固定范围：SPY、QQQ、AAPL、MSFT；一次仅交易所选 1 个标的。Alpaca IEX 可拉取 2—30 个日历日；本机公开演示快照仅有最近 5 个交易日。':'日线：前一根完整日线产生信号，下一根开盘价模拟成交。');}
+  let currentDailyPlan=null;
+  let historicalDaily=null;
+  async function loadHistoricalDaily(){
+    try{
+      if(!historicalDaily){const response=await fetch('/historical-daily-results.json',{cache:'no-cache'});if(!response.ok)throw Error('历史报告不可用');historicalDaily=await response.json();}
+      const market=$('historical-market').value,labels={CN:'A 股',HK:'港股',US:'美股'};
+      text('historical-status',labels[market]+'：'+historicalDaily.markets[market]);
+      const rows=market==='CN'?historicalDaily.rows:[];
+      $('historical-results').replaceChildren(...rows.map(row=>{const tr=node('tr');const fmt=m=>Number(m.cagr_pct).toFixed(2)+'% / '+Math.abs(Number(m.max_drawdown_pct)).toFixed(2)+'%';for(const value of [row.strategy,row.variant,fmt(row.development),fmt(row.holdout),row.meets_goal_both_periods?'两段均达标':'未同时达标'])tr.append(node('td','',value));return tr;}));
+      if(!rows.length)emptyTable('historical-results',5,'没有可验证的历史结果。');
+      text('historical-note',market==='CN'?'658 个交易日、'+historicalDaily.data.symbols_in_list+' 只上市及退市股票；100 万元起始资金，费用已计入。历史规则没有同时达到 8% 年化与 5% 回撤。涨跌停、历史 ST 状态及退市价格仍需完善，结果可能偏乐观。':'该市场的全市场历史行情尚未取得；不使用旧固定名单冒充动态选股回测。');
+    }catch(error){text('historical-status','历史结果读取失败：'+error.message);}
+  }
+  $('historical-market').addEventListener('change',loadHistoricalDaily);
+  async function loadCurrentDailyPlan(){
+    try{
+      if(!currentDailyPlan){const response=await fetch('/current-daily-plan.json',{cache:'no-cache'});if(!response.ok)throw Error('今日策略计划不可用');currentDailyPlan=await response.json();}
+      const labels={CN:'A 股',HK:'港股',US:'美股'},states={expired_daily_open_signal:'昨日信号已过期，今天禁止补单',research_signal_ready:'研究信号待下一开盘核价',data_incomplete:'历史数据未就绪，禁止下单'};
+      const market=$('daily-market').value,plan=currentDailyPlan.markets[market];
+      $('current-market-status').replaceChildren(...['CN','HK','US'].map(code=>{const item=currentDailyPlan.markets[code],tr=node('tr');for(const value of [labels[code],String(item.universe?.listed||item.listed||item.listed_returned||'—'),item.signal_date||'—',states[item.status]||item.status])tr.append(node('td','',value));return tr;}));
+      text('daily-warning',labels[market]+' · '+(states[plan.status]||plan.status)+'。目标：年化至少 8%，最大回撤不超过 5%；新动态股票池尚未完成历史验证。');
+      text('current-plan-rule',plan.rule||plan.reason||'当前无法形成可信的全市场信号。');
+      $('current-selection').replaceChildren(...(plan.selected||[]).map(p=>{const tr=node('tr');for(const value of [p.name+' '+p.symbol,p.target_weight_pct.toFixed(2)+'%',num(p.reference_close,2),num(p.indicative_shares_at_reference_close,0)+' 股',p.indicative_position_weight_pct.toFixed(2)+'%'])tr.append(node('td','',value));return tr;}));
+      if(!plan.selected?.length)emptyTable('current-selection',5,'数据不完整，暂无选股结果。');
+      text('current-plan-cash',plan.initial_cash?'100 万元人民币空仓；理论股票仓位 '+plan.total_stock_weight_pct.toFixed(2)+'%，按 100 股取整后约 '+plan.indicative_stock_weight_pct.toFixed(2)+'%，参考剩余现金 '+num(plan.indicative_cash_after_fees,2)+' 元。':'独立 100 万本币空仓；等待完整行情后计算目标仓位。');
+      text('current-order-warning',plan.status==='expired_daily_open_signal'?'信号形成于 '+plan.signal_date+' 收盘，'+plan.next_open_date+' 开盘已经过去。今天不产生有效买单；需今日收盘后重算。':plan.status==='data_incomplete'?plan.reason:'仅为 '+(plan.next_open_date||'下一交易日')+' 开盘的模拟订单意向，尚未下单。');
+      $('current-orders').replaceChildren(...(plan.order_intentions||[]).map(order=>{const tr=node('tr');for(const value of [order.symbol,order.side==='BUY'?'买入':'卖出',num(order.reference_shares,0)+' 股',order.execution])tr.append(node('td','',value));return tr;}));
+      if(!plan.order_intentions?.length)emptyTable('current-orders',4,'当前无有效买卖订单。');
+    }catch(error){text('daily-warning','策略计划读取失败：'+error.message);}
+  }
+  $('daily-market').addEventListener('change',loadCurrentDailyPlan);  function updateResearchFields(){const f=$('research-form').elements,minute=['opening_range_breakout','vwap_reversion'].includes(f.type.value);for(const kind of ['daily','minute'])for(const label of document.querySelectorAll('[data-research-'+kind+']')){const active=(kind==='minute')===minute;label.hidden=!active;label.querySelector('input').disabled=!active;label.querySelector('input').required=active;}for(const option of f.symbol.options)option.disabled=minute&&!minuteSymbols.has(option.value);if(f.symbol.selectedOptions[0]?.disabled)f.symbol.value='SPY';f.days.min=minute?'2':'90';f.days.max=minute?'30':'1095';if(Number(f.days.value)<Number(f.days.min)||Number(f.days.value)>Number(f.days.max))f.days.value=minute?'5':'365';text('research-message',minute?'分钟策略固定范围：SPY、QQQ、AAPL、MSFT；一次仅交易所选 1 个标的。Alpaca IEX 可拉取 2—30 个日历日；本机公开演示快照仅有最近 5 个交易日。':'日线：前一根完整日线产生信号，下一根开盘价模拟成交。');}
   $('research-form').elements.type.addEventListener('change',updateResearchFields);updateResearchFields();
   async function runResearch(e){e.preventDefault();return busy(e.submitter,async()=>{try{const f=new FormData(e.target),config=Object.fromEntries(f);config.allocation=Number(config.allocation)/100;const reuse=$('reuse-snapshot').checked;if(reuse&&!state.report?.snapshot_id)throw new Error('请先打开一份真实回测报告再选择快照重跑。');message('research-message','正在读取历史数据并计算，请稍候…');const r=await api('backtests',{config,...(reuse?{snapshot_id:state.report.snapshot_id}:{})});showReport(r);message('research-message','回测已持久化。'+(reuse?'本次使用所选报告的原有数据区间，历史天数输入不改变该快照。':''));await loadResearch();}catch(err){message('research-message',err.message,true);}});}
   async function loadBaseline(){return busy($('load-baseline'),async()=>{try{const response=await fetch('/research-baseline.json',{cache:'no-cache'});if(!response.ok)throw new Error('基线文件不可用');const d=await response.json(),m=d.metrics;showReport({baseline:true,config:{name:'原有多资产研究'},engine:'原项目 Python 回测',quality:{rows:d.report.rows,from:d.report.data_start,to:d.report.data_end},metrics:{...m,sharpe:m.sharpe_ratio,volatility:m.annual_volatility,var95:m.value_at_risk_95,total_cost:(m.total_commission||0)+(m.estimated_impact_cost||0)},curve:d.curve.map(x=>({...x,t:x.timestamp})),trades:[],limitations:['冻结研究基线，无法据此生成当前订单。此图采用原项目的多资产基准，数据与当前 Alpaca 账户无关。']});}catch(e){toast(e.message);}});}

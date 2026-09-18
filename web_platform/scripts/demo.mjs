@@ -45,11 +45,16 @@ if(exited.data.outcome!=='filled'||owned!==0)throw Error('Replay sell failed: '+
 const port=Number(process.env.QUANT_DEMO_PORT||8787);
 http.createServer(async(req,res)=>{
   try{
+    if(req.url==='/current-daily-plan.json'){
+      const current=await readFile(new URL('../src/current-daily-plan.json',import.meta.url));
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+      res.end(current);return;
+    }
     const body=[];for await(const part of req)body.push(part);
     const request=new Request(`http://127.0.0.1:${port}${req.url}`,{method:req.method,headers:req.headers,...(body.length?{body:Buffer.concat(body)}:{})});
     const response=await worker.fetch(request,h.env);
     let bytes=Buffer.from(await response.arrayBuffer());
-    if(req.url==='/'&&response.headers.get('content-type')?.includes('text/html'))bytes=Buffer.from(bytes.toString().replace('<body>','<body><div style="position:sticky;top:0;z-index:1000;background:#7a4d09;color:white;padding:10px;text-align:center;font-weight:bold">课堂演示：美股 SPY 使用真实短样本；港股与 A股策略库使用合成样本；订单由本地替身回放，并非 Alpaca Paper 实际成交</div>'));
+    if(req.url==='/'&&response.headers.get('content-type')?.includes('text/html'))bytes=Buffer.from(bytes.toString().replace('<body>','<body><div style="position:sticky;top:0;z-index:1000;background:#7a4d09;color:white;padding:10px;text-align:center;font-weight:bold">本地研究页：日线栏目使用真实历史样本；交易相关功能由本地替身回放，并非 Alpaca Paper 实际成交</div>'));
     res.writeHead(response.status,Object.fromEntries(response.headers));res.end(bytes);
   }catch(error){res.writeHead(500);res.end(error.message);}
 }).listen(port,'127.0.0.1',()=>console.log(`Local demo: http://127.0.0.1:${port}/#showcase · ${allBars.length} historical bars · two replay fills`));
