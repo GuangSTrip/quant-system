@@ -1,6 +1,6 @@
 export function createLongbridgePanel(api){
   const $=id=>document.getElementById(id);
-  let generation=0;
+  let generation=0,refreshing=false;
   const say=value=>{$('lb-status').textContent=value;};
   function clear(){generation++;$('lb-form').reset();$('lb-results').replaceChildren();$('lb-settings').hidden=true;say('请登录课程账号后连接长桥模拟账户。');}
   async function status(){
@@ -9,12 +9,12 @@ export function createLongbridgePanel(api){
       $('lb-settings').hidden=false;$('lb-save').disabled=!d.storage_ready;
       say(!d.storage_ready?'凭证保存服务尚未配置，请联系维护者。':d.configured?'已保存长桥连接。点击“刷新账户”核对资金与持仓。':'尚未连接。请填写模拟账户的三项凭证。');
       $('lb-remove').disabled=!d.configured;
-    }catch(e){if(current===generation){$('lb-settings').hidden=true;say(e.message);}}
+    }catch(e){if(current===generation){$('lb-settings').hidden=true;$('lb-results').replaceChildren();say(e.message);}}
   }
   function table(title,rows,fields,error){
     const section=document.createElement('section'),h=document.createElement('h3');h.textContent=title;section.append(h);
     if(error||!rows?.length){const p=document.createElement('p');p.textContent=error||'暂无记录';section.append(p);}
-    else{const wrap=document.createElement('div');wrap.className='table-wrap';const t=document.createElement('table'),head=t.createTHead().insertRow();
+    else{const wrap=document.createElement('div');wrap.className='table-scroll';const t=document.createElement('table'),head=t.createTHead().insertRow();
       for(const label of Object.values(fields)){const th=document.createElement('th');th.textContent=label;head.append(th);}
       const body=t.createTBody();for(const row of rows){const tr=body.insertRow();for(const key of Object.keys(fields))tr.insertCell().textContent=String(row[key]??'—');}
       wrap.append(t);section.append(wrap);
@@ -33,16 +33,21 @@ export function createLongbridgePanel(api){
     }catch(error){if(current===generation)say(error.message+' 新凭证未保存，原连接未替换。');}
     finally{button.disabled=false;}
   });
-  $('lb-refresh').addEventListener('click',async()=>{
-    await status();if($('lb-settings').hidden)return;const current=++generation;$('lb-refresh').disabled=true;$('lb-results').replaceChildren();say('正在读取长桥账户…');
-    try{const d=await api('longbridge/overview');if(current!==generation)return;render(d);say((d.ok?'查询成功':'部分查询失败')+' · '+d.fetched_at+'。请与长桥模拟账户核对，当前不支持下单。');}
-    catch(e){if(current===generation)say(e.message);}finally{$('lb-refresh').disabled=false;}
-  });
+  async function refresh(){
+    if(refreshing)return;refreshing=true;$('lb-refresh').disabled=true;
+    try{
+      await status();if($('lb-settings').hidden)return;
+      const current=++generation;$('lb-results').replaceChildren();say('正在读取长桥账户…');
+      try{const d=await api('longbridge/overview');if(current!==generation)return;render(d);say((d.ok?'查询成功':'部分查询失败')+' · '+d.fetched_at+'。请与长桥模拟账户核对，当前不支持下单。');}
+      catch(e){if(current===generation)say(e.message);}
+    }finally{refreshing=false;$('lb-refresh').disabled=false;}
+  }
+  $('lb-refresh').addEventListener('click',refresh);
   $('lb-remove').addEventListener('click',async()=>{
     if(!confirm('移除网站保存的长桥凭证？不会取消券商已有订单。'))return;
     const current=++generation;$('lb-remove').disabled=true;
     try{await api('longbridge/disconnect',{confirm:true});if(current!==generation)return;clear();await status();}
     catch(e){if(current===generation)say(e.message);$('lb-remove').disabled=false;}
   });
-  return {status,clear};
+  return {status,clear,refresh};
 }

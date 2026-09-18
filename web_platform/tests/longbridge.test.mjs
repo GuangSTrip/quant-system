@@ -56,3 +56,25 @@ test('missing encryption key prevents broker access and no plaintext is persiste
   const {request,db}=setup(t);
   const r=await request('/api/v1/longbridge/connect',{...credentials,paper_confirm:true});assert.equal(r.status,503);assert.equal(r.data.code,'LB_STORAGE_KEY');assert.equal(db.get('SELECT COUNT(*) n FROM longbridge_connection').n,0);
 });
+
+test('provider transport handles rate limit, malformed JSON, missing data and network failure without leaking secrets',async()=>{
+  for(const [response,code] of [[()=>new Response('',{status:429}),'LB_RATE_LIMIT'],[()=>new Response('broken'),'LB_RESPONSE'],[()=>Response.json({code:0}),'LB_RESPONSE'],[()=>{throw Error(credentials.access_token);},'LB_UNAVAILABLE']]){
+    await assert.rejects(longbridgeRead(credentials,'/v1/asset/account',{},async()=>response()),e=>e.code===code&&!e.message.includes(credentials.access_token));
+  }
+});
+test('overview distinguishes partial failure from empty records and rate limits repeated reads',async t=>{
+ const {env,db,request}=setup(t);env.BROKER_CREDENTIAL_KEY=key;
+ db.sqlite.prepare('INSERT INTO longbridge_connection(id,ciphertext,updated_at,actor) VALUES(1,?,?,?)').run(await seal(env,credentials),'2026-09-18','test');
+ let calls=0;globalThis.fetch=async url=>{calls++;return Response.json(String(url).includes('/account')?{code:0,data:{list:[{currency:'HKD',net_assets:'1000'}]}}:String(url).includes('/stock')?{code:0,data:{wrong:[]}}:{code:0,data:{orders:[]}});};
+ let r=await request('/api/v1/longbridge/overview');assert.equal(r.status,200);assert.equal(r.data.ok,false);assert.equal(r.data.positions,null);assert.match(r.data.errors.positions,/不完整/);assert.deepEqual(r.data.orders,[]);assert.equal(r.data.account[0].net_assets,'1000');assert.equal(calls,3);
+ r=await request('/api/v1/longbridge/overview');assert.equal(r.status,429);assert.equal(calls,3);
+});
+test('missing or corrupt connection fails before broker requests; unauthorized reads and writes are blocked',async t=>{
+ const {env,db,request}=setup(t);env.BROKER_CREDENTIAL_KEY=key;let calls=0;globalThis.fetch=async()=>{calls++;throw Error('unexpected');};
+ assert.equal((await request('/api/v1/longbridge/overview',undefined,{auth:false})).status,401);
+ assert.equal((await request('/api/v1/longbridge/disconnect',{confirm:true},{auth:false})).status,401);
+ assert.equal((await request('/api/v1/longbridge/overview')).status,409);
+ db.sqlite.prepare('INSERT INTO longbridge_connection(id,ciphertext,updated_at,actor) VALUES(1,?,?,?)').run('corrupt','2026-09-18','test');
+ assert.equal((await request('/api/v1/longbridge/overview')).data.code,'LB_CREDENTIAL_UNAVAILABLE');assert.equal(calls,0);
+ assert.equal((await request('/api/v1/longbridge/disconnect',{confirm:false})).status,400);assert.equal(db.get('SELECT COUNT(*) n FROM longbridge_connection').n,1);
+});

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 模拟交易工作台</title><link rel="stylesheet" href="/styles.css?v=platform-7"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 模拟交易工作台</title><link rel="stylesheet" href="/styles.css?v=platform-8"></head>
 <body>
 <div class="app-shell">
   <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>课程交易平台</small></span></a>
@@ -17,13 +17,13 @@
       <button data-view="automation" class="nav">07 <span>自动策略</span></button>
       <button data-view="acceptance" class="nav">06 <span>交付验收</span></button>
     </nav>
-    <div class="sidebar-note"><strong id="broker-label">ALPACA PAPER</strong><p>美股与 ETF · USD<br>仅模拟资金</p><span id="identity-label">正在确认身份</span><button id="sign-in" class="button subtle">账号密码登录</button><button id="sign-out" class="button subtle" hidden>退出登录</button></div>
+    <div class="sidebar-note"><div data-alpaca-only><strong id="broker-label">ALPACA PAPER</strong><p>美股与 ETF · USD<br>仅模拟资金</p></div><div data-hk-only><strong>港股账户查询</strong><p>仅查询 · 下单尚未开放</p></div><span id="identity-label">正在确认身份</span><button id="sign-in" class="button subtle">账号密码登录</button><button id="sign-out" class="button subtle" hidden>退出登录</button></div>
   </aside>
   <main>
-    <header class="topbar"><div><p class="eyebrow">RESEARCH → EXECUTION</p><h1 id="view-title">成果演示</h1></div><div class="actions"><span id="connection" class="badge">正在连接</span><button id="open-help" aria-haspopup="dialog" aria-controls="help-dialog">使用说明</button><button id="refresh" title="重新读取账户与订单">↻ 刷新</button></div></header>
-    <div class="status-line"><span id="freshness" role="status" aria-live="polite">连接服务器…</span><span id="control-state" class="badge">检查交易状态</span></div>
-    <div id="global-error" class="notice error" role="alert" hidden></div>
-    <div id="operator-notice" class="notice" hidden>当前可查看实时账户。使用网站的课程账号和密码登录后，可回测、提交模拟订单及修改风控。</div>
+    <header class="topbar"><div><p class="eyebrow">RESEARCH → EXECUTION</p><h1 id="view-title">成果演示</h1></div><div class="actions"><span data-hk-only class="badge">港股 · 仅查询</span><span data-alpaca-only id="connection" class="badge">正在连接</span><button id="open-help" aria-haspopup="dialog" aria-controls="help-dialog">使用说明</button><button data-alpaca-only id="refresh" title="重新读取账户与订单">↻ 刷新</button></div></header>
+    <div data-alpaca-only class="status-line"><span id="freshness" role="status" aria-live="polite">连接服务器…</span><span id="control-state" class="badge">检查交易状态</span></div>
+    <div data-alpaca-only id="global-error" class="notice error" role="alert" hidden></div>
+    <div data-alpaca-only id="operator-notice" class="notice" hidden>当前可查看实时账户。使用网站的课程账号和密码登录后，可回测、提交模拟订单及修改风控。</div>
 
     <section id="view-showcase" class="view">
       <article class="panel"><p class="eyebrow">STRATEGY → DATA → BACKTEST → SIMULATION</p><h2>一页看清策略如何工作</h2><p class="caption">下方来自已保存的回测和运行记录。历史行情、回测成交与券商订单是三种不同证据；本地演示若使用券商替身，会在页面顶部明确标出。</p><div class="actions"><button data-go="research">查看完整回测与逐笔记录</button><button data-go="automation">查看模拟决策与订单</button><button id="showcase-refresh">刷新成果</button></div></article>

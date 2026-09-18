@@ -32,6 +32,7 @@ import {createStrategyLab} from './strategy-lab.mjs';
     if(view==='longbridge')longbridgePanel.status();
     if(view==='automation')loadAutomation();
     if(!names[view])view='showcase';
+    document.body.dataset.brokerView=['longbridge','hk'].includes(view)?'hk':'alpaca';
     document.querySelectorAll('.view').forEach(e=>{e.hidden=e.id!=='view-'+view;});
     document.querySelectorAll('[data-view]').forEach(e=>{e.classList.toggle('active',e.dataset.view===view);e.setAttribute('aria-current',e.dataset.view===view?'page':'false');});
     text('view-title',names[view]);if(location.hash!=='#'+view)history.replaceState(null,'','#'+view);

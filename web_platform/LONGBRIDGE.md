@@ -17,3 +17,12 @@
 HTTP 地址固定 `https://openapi.longbridge.com`，使用官方 SDK 兼容的传统 API Key 签名（Authorization 直接携带 Access Token，非 OAuth Bearer）。算法参照官方 https://github.com/longbridge/openapi/blob/master/rust/crates/httpclient/src/signature.rs 和 request.rs。账户、持仓和当日订单接口参照 https://open.longbridge.com/zh-CN/docs/trade/asset/account 、https://open.longbridge.com/zh-CN/docs/trade/asset/stock 、https://open.longbridge.com/zh-CN/docs/trade/order/today_orders 。不自动跟随重定向，不发送到用户指定域名，不泄露供应商原始错误。
 
 测试覆盖独立签名对照、AES-GCM 错误密钥与篡改拒绝、认证和 CSRF、保存前只读验证、密文存储、错误凭证保留原连接、移除、固定端点和重定向拒绝。额外 Workerd 测试验证生产运行时加密算法兼容性。自动化使用替身响应，实际凭证由账号持有人在部署后输入，因此不代表实际账户联调或成交已经通过。
+
+## 2026-09-18 查询模块验收
+
+- 线上实际账户：独立课程账号登录成功；三次资金、港股持仓、港股当日订单查询成功；实际持仓和当日订单为空。页面切换后仍可查询，退出后清除账户数据。
+- 修复：长桥/富途页隔离 Alpaca 顶部连接状态、交易开关、刷新时间、错误提示和通用刷新按钮；仅显示港股查询状态及本页刷新入口。
+- 修复：刷新按钮从状态检查开始防重复提交；状态检查失败清除旧结果；宽表使用现有可横向滚动容器。
+- 自动化：106 项通过，包括新增长桥非空数据渲染、部分失败、重复刷新、注销期间迟到响应、限流后恢复、无配置/损坏凭证、越权查询与删除、网络中断和错误脱敏。异常及非空订单场景使用隔离测试数据，未修改线上账户凭证。
+- Worker 运行环境：SHA-1/HMAC 签名和 AES-GCM 测试通过；部署包验证通过。
+- 未完成且不宣称通过：真实账户中非空订单/持仓核对；长桥下单、撤单、成交及自动策略执行（尚未实现）；仅凭资金查询无法独立证明账户为模拟环境。
