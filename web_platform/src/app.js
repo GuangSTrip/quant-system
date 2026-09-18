@@ -1,3 +1,4 @@
+import {createHKTradingUI} from './longbridge-trading-ui.mjs';
 import {createLongbridgePanel} from './longbridge-ui.mjs';
 import {createStrategyLab} from './strategy-lab.mjs';
 (() => {
@@ -28,8 +29,9 @@ import {createStrategyLab} from './strategy-lab.mjs';
     if(!response.ok){if(response.status===401&&path!=='session'&&path!=='auth/login')await loadSession();const e=new Error(data.error||'请求失败');e.code=data.code;throw e;}return data;
   }
   const longbridgePanel=createLongbridgePanel(api);
+  const hkTrading=createHKTradingUI(api);
   function showView(view){
-    if(view==='longbridge')longbridgePanel.status();
+    if(view==='longbridge'){longbridgePanel.status();hkTrading.status();}
     if(view==='automation')loadAutomation();
     if(!names[view])view='showcase';
     document.body.dataset.brokerView=['longbridge','hk'].includes(view)?'hk':'alpaca';
@@ -44,7 +46,7 @@ import {createStrategyLab} from './strategy-lab.mjs';
   async function loadSession(){
     try{state.session=await api('session');text('identity-label',state.session.operator?state.session.username+' · 操作员已登录':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
     catch(e){state.session=null;text('identity-label','身份服务暂不可用');message('global-error',e.message,true);$('operator-notice').hidden=false;}
-    if(!state.session?.operator)longbridgePanel.clear();
+    if(!state.session?.operator){longbridgePanel.clear();hkTrading.clear();}else if(location.hash==='#longbridge'){longbridgePanel.status();hkTrading.status();}
     syncAccess();
   }
   function chart(id,points,series,format=money,markers=[]){

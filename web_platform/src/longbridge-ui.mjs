@@ -38,7 +38,7 @@ export function createLongbridgePanel(api){
     try{
       await status();if($('lb-settings').hidden)return;
       const current=++generation;$('lb-results').replaceChildren();say('正在读取长桥账户…');
-      try{const d=await api('longbridge/overview');if(current!==generation)return;render(d);say((d.ok?'查询成功':'部分查询失败')+' · '+d.fetched_at+'。请与长桥模拟账户核对，当前不支持下单。');}
+      try{const d=await api('longbridge/overview');if(current!==generation)return;render(d);say((d.ok?'查询成功':'部分查询失败')+' · '+d.fetched_at+'。请与长桥模拟账户核对，交易授权与委托请查看下方长桥模拟交易区。');}
       catch(e){if(current===generation)say(e.message);}
     }finally{refreshing=false;$('lb-refresh').disabled=false;}
   }
