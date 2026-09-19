@@ -1,5 +1,4 @@
 """Golden parity against pre-integration e4648b1 plus replay/provider contracts."""
-import hashlib
 import json
 import sys
 import tempfile
@@ -37,25 +36,29 @@ def fixture(market='US'):
     return Study(market,p,features,selections,{},dead)
 
 
-def fingerprint(result):
-    # Ignore sub-nanounit BLAS/platform rounding while retaining complete curves/metrics.
-    def stable(value):
-        if isinstance(value,float):return round(value,8)
-        if isinstance(value,list):return [stable(v) for v in value]
-        if isinstance(value,dict):return {k:stable(v) for k,v in value.items()}
-        return value
-    return hashlib.sha256(json.dumps(stable(result),sort_keys=True,allow_nan=False,separators=(',',':')).encode()).hexdigest()
 
 
 class PortfolioReplayTests(unittest.TestCase):
+    def assert_result_close(self, actual, expected, path='result'):
+        if isinstance(expected, dict):
+            self.assertEqual(set(actual), set(expected), path)
+            for key in expected: self.assert_result_close(actual[key], expected[key], f'{path}.{key}')
+        elif isinstance(expected, list):
+            self.assertEqual(len(actual), len(expected), path)
+            for i, value in enumerate(expected): self.assert_result_close(actual[i], value, f'{path}[{i}]')
+        elif isinstance(expected, float):
+            np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-8, err_msg=path)
+        else:
+            self.assertEqual(actual, expected, path)
+
     def test_all_178_registered_variants_match_original_research_engine(self):
         expected=json.loads((Path(__file__).parent/'fixtures/portfolio_original_golden.json').read_text())
         studies={m:fixture(m) for m in ['CN','HK','US']}
-        self.assertEqual(set(expected['hashes']),set(catalog()))
+        self.assertEqual(set(expected['results']),set(catalog()))
         for key,config in catalog().items():
             with self.subTest(strategy=key):
                 result=simulate(studies[config['market']],**{k:v for k,v in config.items() if k!='market'})
-                self.assertEqual(fingerprint(result),expected['hashes'][key])
+                self.assert_result_close(result,expected['results'][key])
 
     def test_breakout_holding_state_and_risk_phase_survive_serialization(self):
         s=fixture();state=DecisionState.empty(len(s.panel.symbols))
