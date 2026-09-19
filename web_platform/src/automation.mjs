@@ -1,3 +1,4 @@
+import {portfolioGuard} from './portfolio.mjs';
 import {requireValue,nowISO,numeric,strategyConfig,validateBars,signalAt,isIntraday,intradayDecision,normalizeOrder,digest,ENGINE_VERSION} from './engine.mjs';
 const get=(db,sql,...v)=>db.prepare(sql).bind(...v).first();
 const rows=async(db,sql,...v)=>(await db.prepare(sql).bind(...v).all()).results;
@@ -17,6 +18,7 @@ export function createAutomation(services){
     const old=await autoState(db);requireValue(!old.enabled,'请先暂停当前策略');requireValue(!old.lease_id||old.lease_until<Date.now(),'上一轮仍在执行，请稍后再启动');
     const lease=await services.acquire(db);
     try{
+      await portfolioGuard(db,'US');
       const c=await control(db);requireValue(!c.halted,'请先在风控页对账并恢复模拟交易',409,'HALTED');
       const report=await artifact(db,input.backtest_id,'backtest'),config=strategyConfig(report.payload.config);
       requireValue(report.payload.engine===ENGINE_VERSION||report.payload.engine==='course-intraday-1.1.0'||(!isIntraday(config.type)&&report.payload.engine==='course-daily-1.0.0'),'回测版本已变化，请重新回测');
@@ -35,7 +37,7 @@ export function createAutomation(services){
   async function resume(env,db,user,input){
     requireValue(input.confirm==='启动自动模拟交易','请输入“启动自动模拟交易”');const s=await autoState(db);requireValue(s.run_id&&!s.enabled,'请先创建或暂停策略');
     requireValue(!s.lease_id||s.lease_until<Date.now(),'上一轮仍在执行，请稍后重试');
-    requireValue((await reconcile(env,db,user)).ok,'对账未通过',409,'RECONCILIATION_FAILED');requireValue(!(await control(db)).halted,'请先恢复全局交易',409,'HALTED');
+    await portfolioGuard(db,'US');requireValue((await reconcile(env,db,user)).ok,'对账未通过',409,'RECONCILIATION_FAILED');requireValue(!(await control(db)).halted,'请先恢复全局交易',409,'HALTED');
     const changed=await db.batch([db.prepare('UPDATE auto_strategy SET enabled=1,revision=revision+1,reason=?,updated_at=?,lease_id=NULL,lease_until=0,last_check_at=NULL,last_outcome=NULL WHERE id=1 AND revision=? AND enabled=0').bind('等待后台检查',nowISO(),s.revision),await services.auditStatement(db,user.id,'strategy_resumed',s.run_id,{})]);requireValue(changed[0].meta.changes===1,'状态已变化，请刷新');return status(db,env);
   }
   async function record(db,s,source,outcome,details){const stamp=nowISO();await db.batch([db.prepare('INSERT INTO auto_cycles (run_id,source,outcome,details,created_at) VALUES (?,?,?,?,?)').bind(s.run_id,source,outcome,JSON.stringify(details),stamp),db.prepare('UPDATE auto_strategy SET last_check_at=?,last_outcome=?,reason=CASE WHEN enabled=1 THEN ? ELSE reason END,updated_at=? WHERE id=1 AND run_id IS ?').bind(stamp,outcome,details.message||outcome,stamp,s.run_id),db.prepare('DELETE FROM auto_cycles WHERE id NOT IN (SELECT id FROM auto_cycles ORDER BY id DESC LIMIT 1000)')]);return {ok:true,outcome,...details};}

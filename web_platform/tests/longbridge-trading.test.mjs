@@ -10,7 +10,7 @@ async function fixture(t){
  base.db.sqlite.prepare('INSERT INTO longbridge_connection(id,ciphertext,updated_at,actor) VALUES(1,?,?,?)').run(await seal(base.env,creds),'2026-09-18','test');
  const broker={posts:[],orders:new Map(),quantity:0,cash:100000,onPost:null,cancelled:false};
  globalThis.fetch=async(url,options={})=>{
- const u=new URL(url),method=options.method||'GET';if(u.hostname!=='openapi.longbridge.com')return base.broker.fetch(url,options);
+ const u=new URL(url),method=options.method||'GET';if(u.hostname!=='openapi.longbridge.com')return base.broker.fetch(url,options);assert.equal(options.headers['X-Papertrading'],'true');
  const ok=data=>Response.json({code:0,data});
  if(method==='POST'){const p=JSON.parse(options.body);broker.posts.push(p);const id=String(100+broker.posts.length),o={order_id:id,symbol:p.symbol,side:p.side,quantity:p.submitted_quantity,price:p.submitted_price,status:'NewStatus',executed_quantity:'0',executed_price:'0',remark:p.remark};broker.orders.set(id,o);if(broker.onPost)return broker.onPost(o);return ok({order_id:id});}
  if(method==='DELETE'){const o=broker.orders.get(u.searchParams.get('order_id'));o.status=Number(o.executed_quantity)>0?'PartialWithdrawal':'CanceledStatus';broker.cancelled=true;return ok({});}
@@ -110,4 +110,39 @@ test('resume preserves the original run and spent budget with existing filled po
  await f.request('/api/v1/longbridge/auto/tick',{});Object.assign(f.lb.orders.get('101'),{status:'FilledStatus',executed_quantity:'100',executed_price:'10'});f.lb.quantity=100;
  await f.request('/api/v1/longbridge/auto/pause',{});const r=await f.request('/api/v1/longbridge/auto/resume',{confirm:'启动长桥自动模拟交易'});assert.equal(r.status,200);assert.equal(r.data.automation.run_id,runId);assert.equal(r.data.automation.sequence,1);assert.equal(f.lb.posts.length,1);
  time+=6*60000;assert.equal((await f.request('/api/v1/longbridge/auto/tick',{})).data.outcome,'submitted');assert.equal(f.lb.posts.length,2);
+});
+
+async function portfolioFixture(t){
+ const f=await fixture(t);await f.enable();const real=Date.now;Date.now=()=>Date.parse('2026-09-18T02:00:00Z');t.after(()=>Date.now=real);f.db.sqlite.prepare('UPDATE auth_sessions SET expires_at=?').run(Date.now()+8*3600000);
+ const strategy_id='HK:near_high:monthly:inverse_vol:risk06';
+ const signal={schema_version:1,strategy_version:'modular-close-1',strategy_id,market:'HK',currency:'HKD',available:true,signal_date:'2026-09-17',rebalance_date:'2026-09-17',data_asof:'2026-09-17T08:00:00Z',execute_after:'2026-09-18T01:30:00Z',expires_at:'2026-09-18T08:00:00Z',liquidity_caps:{'2800.HK':1e9},origin:'2024-01-02',data_digest:'a'.repeat(64),targets:[{symbol:'2800.HK',weight:.1}],cash_weight:.9};
+ assert.equal((await f.request('/api/v1/portfolio/signals',signal)).status,200);
+ assert.equal((await f.request('/api/v1/portfolio/start',{strategy_id,budget:10000,confirm:'启动组合自动模拟交易'})).status,200);
+ const quote=()=>f.request('/api/v1/portfolio/quotes',{market:'HK',asof:new Date(Date.now()).toISOString(),is_open:true,instruments:[{symbol:'2800.HK',price:10,lot:100,tradable:true,asof:new Date(Date.now()).toISOString()}]});
+ return {...f,quote};
+}
+test('HK registered portfolio uses dynamic lots, Longbridge receipts and retains management when paused',async t=>{
+ const f=await portfolioFixture(t);assert.equal((await f.request('/api/v1/portfolio/tick',{market:'HK'})).data.outcome,'waiting_data');assert.equal(f.lb.posts.length,0);
+ await f.quote();let r=await f.request('/api/v1/portfolio/tick',{market:'HK'});assert.equal(r.data.outcome,'submitted',JSON.stringify(r.data));assert.equal(f.lb.posts[0].submitted_quantity,'100');
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'HK'})).data.outcome,'pending_orders');
+ Object.assign(f.lb.orders.get('101'),{status:'FilledStatus',executed_quantity:'100',executed_price:'10'});f.lb.quantity=100;f.lb.cash-=1000;
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'HK'})).data.outcome,'already_evaluated');assert.equal(f.lb.posts.length,1);
+ await f.request('/api/v1/portfolio/pause',{market:'HK'});assert.equal((await f.request('/api/v1/longbridge/orders/submit',f.order())).data.code,'PORTFOLIO_OWNS_ACCOUNT');
+ assert.equal((await f.request('/api/v1/longbridge/disconnect',{confirm:true})).data.code,'PORTFOLIO_OWNS_ACCOUNT');
+ assert.equal((await f.request('/api/v1/portfolio/release',{market:'HK'})).data.code,'NEEDS_FLAT');
+});
+test('HK portfolio rejects stale/security-invalid quotes and unknown orders pause without retry',async t=>{
+ const f=await portfolioFixture(t);const invalid=await f.request('/api/v1/portfolio/quotes',{market:'HK',asof:'2020-01-01',is_open:true,instruments:[]});assert.equal(invalid.data.code,'STALE_QUOTE');
+ await f.quote();f.lb.onPost=()=>{throw Error('uncertain transport');};const r=await f.request('/api/v1/portfolio/tick',{market:'HK'});assert.equal(r.data.code,'ORDER_UNRESOLVED');assert.equal(f.lb.posts.length,1);
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'HK'})).data.outcome,'paused');assert.equal(f.lb.posts.length,1);
+});
+test('HK portfolio explicit liquidation sells only owned shares and finishes after broker fill',async t=>{
+ const f=await portfolioFixture(t);await f.quote();await f.request('/api/v1/portfolio/tick',{market:'HK'});
+ Object.assign(f.lb.orders.get('101'),{status:'FilledStatus',executed_quantity:'100',executed_price:'10'});f.lb.quantity=100;
+ await f.request('/api/v1/portfolio/tick',{market:'HK'});await f.request('/api/v1/portfolio/pause',{market:'HK'});
+ assert.equal((await f.request('/api/v1/portfolio/liquidate',{market:'HK',confirm:'平仓并停止组合'})).status,200);
+ let r=await f.request('/api/v1/portfolio/tick',{market:'HK'});assert.equal(r.data.outcome,'submitted',JSON.stringify(r.data));assert.equal(f.lb.posts[1].side,'Sell');assert.equal(f.lb.posts[1].submitted_quantity,'100');
+ Object.assign(f.lb.orders.get('102'),{status:'FilledStatus',executed_quantity:'100',executed_price:'10'});f.lb.quantity=0;
+ r=await f.request('/api/v1/portfolio/tick',{market:'HK'});assert.equal(r.data.outcome,'no_order',JSON.stringify(r.data));assert.equal(f.db.get('SELECT enabled FROM portfolio_runs').enabled,0);
+ assert.equal((await f.request('/api/v1/portfolio/release',{market:'HK'})).status,200);
 });

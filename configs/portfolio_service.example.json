@@ -1,0 +1,16 @@
+{
+  "site_origin": "https://YOUR-OWN-WEBSITE.example",
+  "poll_seconds": 30,
+  "markets": {
+    "US": {
+      "provider": "alpaca",
+      "strategies": "all",
+      "symbols": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "V", "MA", "UNH", "JNJ", "XOM", "PG", "HD", "COST", "ABBV", "BAC", "KO", "PEP", "AVGO", "MRK", "CVX", "WMT", "CSCO", "ACN", "CRM", "MCD", "LIN", "ABT"]
+    },
+    "HK": {
+      "provider": "longbridge",
+      "strategies": "all",
+      "symbols": ["5.HK", "11.HK", "16.HK", "17.HK", "27.HK", "66.HK", "101.HK", "175.HK", "267.HK", "288.HK", "386.HK", "388.HK", "669.HK", "688.HK", "700.HK", "762.HK", "823.HK", "883.HK", "939.HK", "941.HK", "998.HK", "1038.HK", "1093.HK", "1109.HK", "1113.HK", "1177.HK", "1299.HK", "1398.HK", "2318.HK", "2388.HK"]
+    }
+  }
+}

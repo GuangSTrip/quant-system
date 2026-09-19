@@ -5,9 +5,6 @@ on:
     - cron: '3,13,23,33,43,53 13-21 * * 1-5'
     - cron: '17 * * * *'
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/paper-scheduler.yml']
 permissions:
   contents: read
   id-token: write
@@ -16,13 +13,13 @@ concurrency:
   cancel-in-progress: false
 jobs:
   tick:
-    if: github.repository_id == '1363796451'
+    if: vars.PAPER_SCHEDULER_ENABLED == 'true' && vars.PAPER_SITE_ORIGIN != ''
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
       - name: Authenticate scheduler and execute authorized Paper strategy
         env:
-          SITE_ORIGIN: https://quant-system-course-dashboard.able-stork-1502.chatgpt.site
+          SITE_ORIGIN: ${{ vars.PAPER_SITE_ORIGIN }}
         shell: bash
         run: |
           node --input-type=module <<'JS'

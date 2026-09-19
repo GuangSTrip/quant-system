@@ -4,6 +4,7 @@
 <div class="app-shell">
   <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>课程交易平台</small></span></a>
     <nav aria-label="主导航">
+      <button data-view="portfolio" class="nav">组 <span>组合策略</span></button>
       <button data-view="longbridge" class="nav">港 <span>港股 · 长桥</span></button>
       <button data-view="showcase" class="nav active">00 <span>成果演示</span></button>
       <button data-view="daily" class="nav">日 <span>日线策略研究</span></button>
@@ -64,10 +65,10 @@
 <label>模拟账户 Access Token<input id="lb-token" type="password" autocomplete="new-password" minlength="8" maxlength="8192" required></label>
 <label><input id="lb-paper" type="checkbox" required>我确认三项凭证来自同一应用，Access Token 属于模拟账户。</label>
 </div><div class="actions"><button id="lb-save" class="primary" type="submit">验证连接并保存</button><button id="lb-remove" type="button" disabled>移除已保存连接</button></div></form>
-</details><p class="caption">成功读取资金仅证明凭证可用，尚不证明账户环境；请与开发者中心的模拟账户核对。交易需在下方单独启用，授权仅适用于当前保存的连接。</p></div>
+</details><p class="caption">请求固定携带 X-Papertrading 模拟环境保护头；请与开发者中心的模拟账户核对。交易需在下方单独启用，授权仅适用于当前保存的连接。</p></div>
 <div id="lb-results"></div></div>
 <div id="lb-execution" hidden>
-<article class="panel"><div class="panel-head"><h2>长桥模拟交易</h2><button id="lb-trading-refresh">刷新交易记录</button></div><p id="lb-execution-state" role="status"></p><p>所有金额均为港币。仅限价整手单，不使用融资或做空。API 未提供独立模拟环境标识，启用前请在长桥开发者中心确认当前 Token 来自模拟账户。</p>
+<article class="panel"><div class="panel-head"><h2>长桥模拟交易</h2><button id="lb-trading-refresh">刷新交易记录</button></div><p id="lb-execution-state" role="status"></p><p>所有金额均为港币。仅限价整手单，不使用融资或做空。请求固定携带模拟环境保护头，启用前请在长桥开发者中心确认当前 Token 来自模拟账户。</p>
 <details><summary>启用交易与调整限额</summary><form id="lb-enable-form"><div class="form-grid"><label>单笔限额（HKD）<input name="max_order" type="number" min="1" max="100000000" value="2000" required></label><label>当日提交限额（HKD）<input name="max_daily" type="number" min="1" max="100000000" value="5000" required></label><label class="full">输入“确认长桥模拟账户”<input name="confirm" required autocomplete="off"></label></div><button type="submit">确认并启用模拟交易</button><p id="lb-enable-feedback" class="notice" role="status" aria-live="polite"></p></form></details>
 <div class="actions"><button id="lb-pause-trading">暂停新增交易与策略</button><button id="lb-recover">恢复超时执行通道</button></div><p class="caption">暂停不会撤回正在提交的请求，也不会自动撤单；可在下方逐笔申请撤销。执行中断超过六分钟后可恢复通道，恢复后必须先核对未决订单。</p></article>
 <article class="panel"><h2>限价模拟委托</h2><form id="lb-trade-form"><div class="form-grid"><label>港股代码<input name="symbol" value="2800.HK" required></label><label>方向<select name="side"><option value="Buy">买入</option><option value="Sell">卖出</option></select></label><label>每手股数（按长桥标的资料填写）<input name="lot_size" type="number" min="1" step="1" value="500" required></label><label>委托股数<input name="quantity" type="number" min="1" step="1" value="500" required></label><label>限价（HKD）<input name="price" type="number" min="0.001" step="0.001" required></label></div><label><input id="lb-queued" type="checkbox">允许休市排队，待开市后由券商处理</label><button type="submit">预览订单与风控</button></form><p id="lb-order-summary">先预览，再确认提交；修改参数后必须重新预览。</p><button id="lb-submit-order" disabled>确认提交本笔模拟委托</button><p id="lb-order-feedback" class="notice" role="status" aria-live="polite"></p></article>
@@ -75,6 +76,7 @@
 <form id="lb-auto-form"><div class="form-grid"><label>港股代码<input name="symbol" value="2800.HK" required></label><label>每手股数<input name="lot_size" type="number" min="1" step="1" value="500" required></label><label>每次买入股数<input name="quantity" type="number" min="1" step="1" value="500" required></label><label>买入限价（HKD）<input name="price" type="number" min="0.001" step="0.001" required></label><label>总提交预算（HKD）<input name="budget" type="number" min="1" value="5000" required></label><label>间隔分钟<input name="interval_minutes" type="number" min="5" max="10080" value="60" required></label><label class="full">输入“启动长桥自动模拟交易”<input name="confirm" required autocomplete="off"></label></div><button type="submit">启动长桥自动策略</button><p id="lb-auto-feedback" class="notice" role="status" aria-live="polite"></p></form><div class="actions"><button id="lb-auto-pause">暂停自动策略</button><button id="lb-auto-resume">恢复原策略</button><button id="lb-auto-tick">立即检查一轮</button></div><p id="lb-auto-state" role="status"></p><p class="caption">实际检查频率取决于后台调度；不会补下错过时段的订单。关闭网页后仍会运行。</p></article>
 <p id="lb-trade-message" class="notice" role="status"></p><article class="panel"><h2>本平台长桥委托与成交核对</h2><p>“已提交”不等于“已成交”，“撤单申请”不等于“已撤销”。以券商订单号、累计成交、成交明细和持仓变化为证据。</p><div id="lb-ledger"></div><div id="lb-receipt" aria-live="polite"></div></article>
 </div></section>
+<section id="view-portfolio" class="view" hidden><div id="portfolio-workbench"></div></section>
 <section id="view-hk" class="view" hidden>
 <div class="panel"><h2>港股模拟账户 · 富途</h2><p>当前接入阶段：查询模拟资金、持仓、订单和港股报价。下单与自动执行尚未开放；这里不使用策略库的合成数据。</p>
 <form id="hk-form" class="actions"><label>港股代码<input id="hk-symbol" value="HK.00700" maxlength="10" required></label><button id="hk-refresh" type="submit">查询富途模拟账户</button></form>
@@ -153,7 +155,7 @@
       <article class="panel"><div class="panel-head"><h2>验收记录</h2><button id="acceptance-history-refresh">刷新记录</button></div><label>选择已有记录<select id="acceptance-history"><option value="">尚未选择</option></select></label></article>
       <article id="acceptance-report" class="panel" hidden><div class="panel-head"><div><p class="eyebrow">SAVED VERIFICATION REPORT</p><h2 id="acceptance-title">验收报告</h2></div><span id="acceptance-status" class="badge">未完成</span></div><p id="acceptance-time" class="caption"></p><div id="acceptance-details"></div><div id="acceptance-checks" class="record-list"></div><div class="notice" id="acceptance-notes"></div><label class="check"><input type="checkbox" id="acceptance-queued">休市时允许本次两笔限价委托排队；排队不代表已成交</label><div class="actions"><button id="acceptance-submit" class="primary" data-operator>2. 预览 1 股成交验证单</button><button id="acceptance-cancel" data-operator>3. 创建并撤销独立测试单</button><button id="acceptance-inspect" data-operator>4. 查询成交并更新报告</button><button id="acceptance-export">导出汇报文档</button><button id="acceptance-export-json">导出原始证据</button></div><p class="caption">页面可见且停留在此处时，每 30 秒查询已提交验收单。关闭页面不会取消券商委托；重新打开记录后可继续检查。</p></article>
     </section>
-    <footer>课程版 · 分钟与日线策略均为独立研究；分钟库含合成演示样本，日线库为历史回测。券商模拟执行支持美股 Alpaca Paper 与经操作员确认的长桥模拟账户。日线组合研究尚未接入自动执行。回测成交不是券商订单，不提供真实资金交易。</footer>
+    <footer>课程版 · 分钟与日线策略均为独立研究；分钟库含合成演示样本，日线库为历史回测。券商模拟执行支持美股 Alpaca Paper 与经操作员确认的长桥模拟账户。日线组合通过最新信号接入美股、港股自动模拟执行；A 股待接券商。回测成交不是券商订单，不提供真实资金交易。</footer>
   </main>
 </div>
 <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form" class="dialog-content" method="post" action="/api/v1/auth/login"><div class="panel-head"><h2 id="login-title">课程操作员登录</h2><button type="button" data-close="login-dialog" aria-label="关闭登录">×</button></div><p class="caption">使用独立的网站账号和密码。登录后可操作当前课程模拟账户；会话有效期为 8 小时。</p><div class="stack"><label>账号<input id="login-username" name="username" autocomplete="username" maxlength="100" required></label><label>密码<input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128" required></label></div><p id="login-error" class="notice error" role="alert" hidden></p><div class="actions"><button type="button" data-close="login-dialog">继续以访客查看</button><button type="submit" id="login-submit" class="primary">登录</button></div></form></dialog>

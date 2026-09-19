@@ -17,7 +17,7 @@ export async function signedHeaders(credentials,path,query='',timestamp=String(M
   const canonical=`${method}|${path}|${query}|${values}|${signed}|`+(body===undefined?'':await sha1(body));
   const key=await crypto.subtle.importKey('raw',encoder.encode(credentials.app_secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const signature=hex(await crypto.subtle.sign('HMAC',key,encoder.encode('HMAC-SHA256|'+await sha1(canonical))));
-  return {'Authorization':credentials.access_token,'X-Api-Key':credentials.app_key,'X-Timestamp':timestamp,
+  return {'X-Papertrading':'true','Authorization':credentials.access_token,'X-Api-Key':credentials.app_key,'X-Timestamp':timestamp,
     'X-Api-Signature':`HMAC-SHA256 SignedHeaders=${signed}, Signature=${signature}`,'Content-Type':'application/json; charset=utf-8'};
 }
 
@@ -73,7 +73,7 @@ function accounts(data){
 export async function connectionStatus(env,db){
   const row=await db.prepare('SELECT ciphertext,updated_at FROM longbridge_connection WHERE id=1').first();
   const c=await db.prepare('SELECT enabled,connection_tag FROM lb_control WHERE id=1').first();
-  return {ok:true,configured:Boolean(row),storage_ready:Boolean(env.BROKER_CREDENTIAL_KEY),updated_at:row?.updated_at||null,execution_enabled:Boolean(row&&c?.enabled&&c.connection_tag===await digest(row.ciphertext)),environment_verified:false};
+  return {ok:true,configured:Boolean(row),storage_ready:Boolean(env.BROKER_CREDENTIAL_KEY),updated_at:row?.updated_at||null,execution_enabled:Boolean(row&&c?.enabled&&c.connection_tag===await digest(row.ciphertext)),environment_verified:false,paper_guard:true};
 }
 async function rateLimit(db){
   const time=Date.now();

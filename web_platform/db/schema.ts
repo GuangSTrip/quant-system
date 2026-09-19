@@ -1,4 +1,4 @@
-import {sqliteTable,text,integer,real,index} from 'drizzle-orm/sqlite-core';
+import {sqliteTable,text,integer,real,index,uniqueIndex} from 'drizzle-orm/sqlite-core';
 
 export const control=sqliteTable('control',{
   id:integer('id').primaryKey(),halted:integer('halted').notNull().default(1),
@@ -68,4 +68,24 @@ export const lbAuto=sqliteTable('lb_auto',{
  id:integer('id').primaryKey(),enabled:integer('enabled').notNull().default(0),runId:text('run_id'),config:text('config'),
  nextAt:integer('next_at').notNull().default(0),sequence:integer('sequence').notNull().default(0),
  heartbeatAt:text('heartbeat_at'),lastAt:text('last_at'),outcome:text('outcome'),reason:text('reason'),updatedAt:text('updated_at').notNull()
+});
+
+// One isolated portfolio sleeve per market/account. Pausing retains ownership.
+export const portfolioRuns=sqliteTable('portfolio_runs',{
+ exitRequested:integer('exit_requested').notNull().default(0),market:text('market').primaryKey(),runId:text('run_id').notNull(),strategyId:text('strategy_id').notNull(),
+ version:text('version').notNull(),connectionTag:text('connection_tag').notNull(),budget:real('budget').notNull(),
+ enabled:integer('enabled').notNull().default(0),revision:integer('revision').notNull().default(0),
+ leaseId:text('lease_id'),leaseUntil:integer('lease_until').notNull().default(0),
+ lastDecision:text('last_decision'),reason:text('reason').notNull(),updatedAt:text('updated_at').notNull()
+});
+export const portfolioSignals=sqliteTable('portfolio_signals',{
+ id:text('id').primaryKey(),strategyId:text('strategy_id').notNull(),signalDate:text('signal_date').notNull(),
+ payload:text('payload').notNull(),createdAt:text('created_at').notNull()
+},t=>[uniqueIndex('idx_portfolio_signal').on(t.strategyId,t.signalDate)]);
+export const portfolioDecisions=sqliteTable('portfolio_decisions',{
+ id:text('id').primaryKey(),runId:text('run_id').notNull(),signalId:text('signal_id').notNull(),
+ phase:text('phase').notNull(),payload:text('payload').notNull(),createdAt:text('created_at').notNull()
+});
+export const portfolioQuotes=sqliteTable('portfolio_quotes',{
+ market:text('market').primaryKey(),payload:text('payload').notNull(),updatedAt:text('updated_at').notNull()
 });

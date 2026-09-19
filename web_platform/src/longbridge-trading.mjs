@@ -1,3 +1,4 @@
+import {portfolioGuard} from './portfolio.mjs';
 import {AppError,requireValue,nowISO,numeric,digest} from './engine.mjs';
 import {signedHeaders,unseal} from './longbridge.mjs';
 const first=(db,s,...v)=>db.prepare(s).bind(...v).first();
@@ -40,7 +41,7 @@ async function lock(db,fn){await init(db);const id=crypto.randomUUID();const r=a
 async function authorized(env,db){const c=await control(db),conn=await connection(env,db);requireValue(c.enabled&&c.connection_tag===conn.tag,'请先确认模拟账户并启用长桥交易；更换凭证会使授权失效',409,'LB_DISABLED');return {...conn,control:c};}
 const publicOrder=r=>({...r,payload:JSON.parse(r.payload),broker_data:r.broker_data?JSON.parse(r.broker_data):null,connection_tag:undefined,request_hash:undefined});
 export async function tradingState(env,db){const c=await control(db),a=await first(db,'SELECT * FROM lb_auto WHERE id=1'),row=await first(db,'SELECT ciphertext FROM longbridge_connection WHERE id=1'),tag=row?await digest(row.ciphertext):null;
- return {ok:true,control:{enabled:Boolean(c.enabled&&tag===c.connection_tag),max_order:c.max_order,max_daily:c.max_daily,busy:!!c.lease_id,lease_until:c.lease_until,environment_basis:'操作员确认模拟 Token；接口未独立证明账户环境'},automation:{...a,config:a.config?JSON.parse(a.config):null},scheduler:{configured:env.SCHEDULER_NATIVE==='true'||Boolean(env.SCHEDULER_REPOSITORY_ID),healthy:!!a.heartbeat_at&&Date.now()-Date.parse(a.heartbeat_at)<75*60000},orders:(await rows(db,'SELECT * FROM lb_orders WHERE connection_tag=? ORDER BY created_at DESC LIMIT 100',tag||'')).map(publicOrder)};
+ return {ok:true,control:{enabled:Boolean(c.enabled&&tag===c.connection_tag),max_order:c.max_order,max_daily:c.max_daily,busy:!!c.lease_id,lease_until:c.lease_until,environment_basis:'强制 X-Papertrading: true；模拟 Token 由券商校验'},automation:{...a,config:a.config?JSON.parse(a.config):null},scheduler:{configured:env.SCHEDULER_NATIVE==='true'||Boolean(env.SCHEDULER_REPOSITORY_ID),healthy:!!a.heartbeat_at&&Date.now()-Date.parse(a.heartbeat_at)<75*60000},orders:(await rows(db,'SELECT * FROM lb_orders WHERE connection_tag=? ORDER BY created_at DESC LIMIT 100',tag||'')).map(publicOrder)};
 }
 export async function setTrading(env,db,user,input){
  await init(db);
@@ -52,9 +53,11 @@ export async function setTrading(env,db,user,input){
 async function holdings(credentials){const d=await tradeRequest(credentials,'GET','/v1/asset/stock');requireValue(Array.isArray(d.list),'持仓格式异常',502);return d.list.flatMap(x=>{requireValue(Array.isArray(x.stock_info),'持仓格式异常',502);return x.stock_info;}).filter(x=>x.market==='HK');}
 async function brokerOrders(credentials){const d=await tradeRequest(credentials,'GET','/v1/trade/order/today',{market:'HK'});requireValue(Array.isArray(d.orders),'订单列表格式异常',502);return d.orders;}
 async function validateRisk(env,db,o,autoRun){
+ const portfolio=autoRun&&typeof autoRun==='object';
+ await portfolioGuard(db,'HK',portfolio?autoRun:null);
  const ctx=await authorized(env,db),{credentials,tag,control:c}=ctx;
  const a=await first(db,'SELECT * FROM lb_auto WHERE id=1');
- requireValue(autoRun? a.enabled&&a.run_id===autoRun:!a.enabled,'自动策略已暂停或正在管理账户，请先暂停再手动下单',409,'LB_AUTO_OWNS');
+ requireValue(portfolio?!a.enabled:autoRun? a.enabled&&a.run_id===autoRun:!a.enabled,'自动策略已暂停或正在管理账户，请先暂停再手动下单',409,'LB_AUTO_OWNS');
  const unresolved=await first(db,"SELECT client_id FROM lb_orders WHERE connection_tag=? AND status IN ('unknown','submitting','cancel_unknown') LIMIT 1",tag);requireValue(!unresolved,'存在待核对交易，禁止新增订单',409,'LB_UNRESOLVED');
  const notional=o.quantity*o.price;requireValue(notional<=c.max_order,'订单金额超过长桥单笔限额',409,'LB_ORDER_LIMIT');
  const day=new Date(Date.now()+8*3600000).toISOString().slice(0,10),since=new Date(Date.parse(day+'T00:00:00+08:00')).toISOString();
@@ -76,12 +79,12 @@ async function submitLocked(env,db,user,input,autoRun=null){
  const o=normalizeHK(input);requireValue(input.confirm===true,'请确认限价模拟订单');requireValue(hkWindow()||input.allow_queued===true,'当前不在港股常规时段；请确认允许排队',409,'LB_CLOSED');
  const id=String(input.client_id||'');requireValue(/^[a-zA-Z0-9_-]{16,64}$/.test(id),'缺少有效的唯一请求编号');const hash=await digest(o),conn=await connection(env,db);
  const old=await first(db,'SELECT * FROM lb_orders WHERE client_id=?',id);
- if(old){requireValue(old.request_hash===hash&&old.connection_tag===conn.tag,'相同请求编号不能用于不同订单或账户',409,'LB_ID_CONFLICT');return {ok:!['unknown','submitting'].includes(old.status),reused:true,order:publicOrder(old)};}
+ if(old){requireValue(old.request_hash===hash&&old.connection_tag===conn.tag,'相同请求编号不能用于不同订单或账户',409,'LB_ID_CONFLICT');return {ok:!['unknown','submitting','rejected','RejectedStatus'].includes(old.status),reused:true,order:publicOrder(old)};}
  const ctx=await validateRisk(env,db,o,autoRun),payload={symbol:o.symbol,side:o.side,order_type:'LO',submitted_quantity:String(o.quantity),submitted_price:String(o.price),time_in_force:'Day',remark:'qs:'+id,client_request_id:id};
- await run(db,'INSERT INTO lb_orders(client_id,connection_tag,payload,request_hash,status,notional,initial_qty,actor,run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,ctx.tag,JSON.stringify(o),hash,'submitting',ctx.notional,ctx.initialQty,user.id,autoRun,nowISO(),nowISO());
+ await run(db,'INSERT INTO lb_orders(client_id,connection_tag,payload,request_hash,status,notional,initial_qty,actor,run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,ctx.tag,JSON.stringify(o),hash,'submitting',ctx.notional,ctx.initialQty,user.id,autoRun&&typeof autoRun==='object'?autoRun.run_id:autoRun,nowISO(),nowISO());
  await audit(db,user.id,'lb_submit_intent',id,{order:o,notional:ctx.notional});
  // Recheck the pause switch after asynchronous risk checks and before dispatch.
- try{await authorized(env,db);if(autoRun){const a=await first(db,'SELECT enabled,run_id FROM lb_auto WHERE id=1');requireValue(a.enabled&&a.run_id===autoRun,'策略已暂停',409,'LB_AUTO_STOPPED');}}catch(e){await run(db,"UPDATE lb_orders SET status='rejected',error=?,updated_at=? WHERE client_id=?",safeError(e),nowISO(),id);throw e;}
+ try{await authorized(env,db);if(autoRun&&typeof autoRun==='object'){await portfolioGuard(db,'HK',autoRun);}else if(autoRun){const a=await first(db,'SELECT enabled,run_id FROM lb_auto WHERE id=1');requireValue(a.enabled&&a.run_id===autoRun,'策略已暂停',409,'LB_AUTO_STOPPED');}}catch(e){await run(db,"UPDATE lb_orders SET status='rejected',error=?,updated_at=? WHERE client_id=?",safeError(e),nowISO(),id);throw e;}
  try{
  const result=await tradeRequest(ctx.credentials,'POST','/v1/trade/order',{},payload);requireValue(typeof result.order_id==='string'&&result.order_id.length>0,'缺少券商订单号，请核对结果',502,'LB_UNKNOWN');
  await run(db,"UPDATE lb_orders SET broker_id=?,status='submitted',updated_at=? WHERE client_id=?",result.order_id,nowISO(),id);
@@ -155,6 +158,7 @@ export async function tickHK(env,db,source='manual'){
  });}catch(e){if(e.code==='LB_BUSY')return {ok:true,outcome:'busy',message:e.message};await run(db,'UPDATE lb_auto SET enabled=0 WHERE id=1');return outcome(db,'fault',safeError(e));}
 }
 export async function changeHKConnection(db,fn){return lock(db,async()=>{
+ await portfolioGuard(db,'HK');
  const active=await rows(db,"SELECT status FROM lb_orders WHERE status NOT IN ('FilledStatus','CanceledStatus','RejectedStatus','ExpiredStatus','PartialWithdrawal','rejected') LIMIT 1");
  requireValue(!active.length,'仍有未完成或未知的长桥委托，请核对并处理后再更换连接',409,'LB_PENDING');
  const a=await first(db,'SELECT enabled FROM lb_auto WHERE id=1');requireValue(!a.enabled,'请先暂停长桥自动策略',409);
@@ -162,7 +166,7 @@ export async function changeHKConnection(db,fn){return lock(db,async()=>{
 });}
 export async function resumeHKAuto(env,db,user,input){
  requireValue(input.confirm==='启动长桥自动模拟交易','请确认恢复长桥自动模拟交易');
- return lock(db,async()=>{const a=await first(db,'SELECT * FROM lb_auto WHERE id=1');requireValue(a.run_id&&a.config&&!a.enabled,'没有可恢复的已暂停策略',409);const ctx=await authorized(env,db),c=JSON.parse(a.config);requireValue(c.connection_tag===ctx.tag,'连接已变化，不能恢复旧策略',409);
+ return lock(db,async()=>{await portfolioGuard(db,'HK');const a=await first(db,'SELECT * FROM lb_auto WHERE id=1');requireValue(a.run_id&&a.config&&!a.enabled,'没有可恢复的已暂停策略',409);const ctx=await authorized(env,db),c=JSON.parse(a.config);requireValue(c.connection_tag===ctx.tag,'连接已变化，不能恢复旧策略',409);
  const ledger=await rows(db,'SELECT * FROM lb_orders WHERE run_id=? ORDER BY created_at',a.run_id);
  for(const o of ledger.filter(o=>!done.has(o.status)).slice(0,10))await inspectLocked(env,db,o.client_id);
  requireValue(!(await first(db,"SELECT client_id FROM lb_orders WHERE connection_tag=? AND status IN ('unknown','submitting','cancel_unknown') LIMIT 1",ctx.tag)),'存在未决委托，请先核对',409);
@@ -170,3 +174,26 @@ export async function resumeHKAuto(env,db,user,input){
  await run(db,"UPDATE lb_auto SET enabled=1,reason='恢复原策略，保留累计预算与执行序号',updated_at=? WHERE id=1",nowISO());await audit(db,user.id,'lb_auto_resumed',a.run_id,{});return tradingState(env,db);
  });
 }
+
+// Portfolio adapter keeps Longbridge credentials, risk limits, locks and receipt handling in one module.
+export const hkPortfolioAdapter={
+ exclusive:lock,
+ async available(env,db){await authorized(env,db);const a=await first(db,'SELECT enabled FROM lb_auto WHERE id=1');requireValue(!a?.enabled,'请先暂停长桥定投策略',409);},
+ async snapshot(env,db,symbols){
+  const {credentials,tag}=await connection(env,db);
+  const [p,open,funds]=await Promise.all([holdings(credentials),brokerOrders(credentials),tradeRequest(credentials,'GET','/v1/asset/account',{currency:'HKD'})]);
+  requireValue(Array.isArray(funds.list),'资金返回异常',502);
+  const cash=funds.list.flatMap(x=>x.cash_infos||[]).filter(x=>x.currency==='HKD').reduce((n,x)=>n+Number(x.available_cash),0);
+  const row=await first(db,'SELECT payload FROM portfolio_quotes WHERE market=?','HK'),feed=row?JSON.parse(row.payload):null,quotes={};
+  if(symbols.length){requireValue(feed&&Date.now()-Date.parse(feed.asof)>=-5000&&Date.now()-Date.parse(feed.asof)<=120000,'港股行情服务未发布两分钟内的报价及交易日历',409,'STALE_QUOTE');
+   for(const symbol of symbols){const q=feed.instruments.find(x=>x.symbol===symbol);requireValue(q&&Date.now()-Date.parse(q.asof)<=120000,'证券行情过期：'+symbol,409,'STALE_QUOTE');quotes[symbol]=q;}}
+  return {tag,cash,positions:p.map(x=>({symbol:x.symbol,qty:Number(x.quantity)})),pending:open.some(x=>!done.has(x.status)),is_open:hkWindow()&&feed?.is_open===true,quotes};
+ },
+ async reconcile(env,db,s){
+  const pending=await rows(db,"SELECT client_id FROM lb_orders WHERE run_id=? AND status NOT IN ('FilledStatus','CanceledStatus','RejectedStatus','ExpiredStatus','PartialWithdrawal','rejected')",s.run_id);
+  for(const o of pending)await inspectHK(env,db,o.client_id);
+  const unknown=await first(db,"SELECT client_id FROM lb_orders WHERE status IN ('unknown','submitting','cancel_unknown') LIMIT 1");requireValue(!unknown,'存在未决长桥委托',409,'LB_UNRESOLVED');
+ },
+ async ledger(db,s){return (await rows(db,'SELECT * FROM lb_orders WHERE run_id=?',s.run_id)).map(o=>{const b=o.broker_data?JSON.parse(o.broker_data):null,p=JSON.parse(o.payload);return {key:o.client_id.replace(/^pf_/,''),symbol:p.symbol,side:p.side==='Buy'?'buy':'sell',filled:Number(b?.executed_quantity||0),price:Number(b?.executed_price||0)};});},
+ async submit(env,db,s,o){return lock(db,()=>submitLocked(env,db,{id:'portfolio:'+s.run_id},{symbol:o.symbol,side:o.side==='buy'?'Buy':'Sell',quantity:o.qty,lot_size:o.lot_size,price:o.price,confirm:true,client_id:'pf_'+o.key.replaceAll('-','')},{run_id:s.run_id,revision:s.revision}));}
+};

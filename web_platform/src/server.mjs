@@ -1,4 +1,6 @@
-import {tradingState,setTrading,previewHK,submitHK,inspectHK,cancelHK,recoverHK,startHKAuto,pauseHKAuto,resumeHKAuto,tickHK,changeHKConnection} from './longbridge-trading.mjs';
+import {createPortfolio,portfolioGuard} from './portfolio.mjs';
+import {buildPortfolioCatalog,instrumentSymbol} from './portfolio-contract.mjs';
+import {tradingState,setTrading,previewHK,submitHK,inspectHK,cancelHK,recoverHK,startHKAuto,pauseHKAuto,resumeHKAuto,tickHK,changeHKConnection,hkPortfolioAdapter} from './longbridge-trading.mjs';
 import {connectionStatus,saveConnection,removeConnection,connectionOverview} from './longbridge.mjs';
 import {hkOverview} from './hk.mjs';
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,INTRADAY_SYMBOLS,strategyConfig,isIntraday,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
@@ -31,11 +33,12 @@ async function operator(request,env,db){
   return user;
 }
 async function body(request){
+  const path=new URL(request.url).pathname;const limit=path==='/api/v1/portfolio/backtests'?2000000:path==='/api/v1/portfolio/signals'?500000:20000;
   requireValue(request.headers.get('origin')===new URL(request.url).origin,'请求来源校验失败',403,'ORIGIN_MISMATCH');
   requireValue(request.headers.get('x-quant-action')==='1','缺少操作标记',403,'CSRF');
   requireValue(request.headers.get('content-type')?.startsWith('application/json'),'请提交 JSON',415);
-  requireValue(Number(request.headers.get('content-length')||0)<=20000,'请求过大',413);
-  const text=await request.text();requireValue(text.length<=20000,'请求过大',413);
+  requireValue(Number(request.headers.get('content-length')||0)<=limit,'请求过大',413);
+  const text=await request.text();requireValue(text.length<=limit,'请求过大',413);
   try{const obj=JSON.parse(text);requireValue(obj&&typeof obj==='object'&&!Array.isArray(obj),'请求格式无效');return obj;}catch(e){if(e instanceof AppError)throw e;throw new AppError('JSON 格式错误');}
 }
 const pick=(o,keys)=>Object.fromEntries(keys.map(k=>[k,o?.[k]??null]));
@@ -75,6 +78,8 @@ async function acquire(db){
 }
 async function release(db,id){await run(db,'UPDATE control SET lease_id=NULL,lease_until=0 WHERE id=1 AND lease_id=?',id);}
 async function saveBrokerOrder(env,db,row,order,actor,kind='order_status'){
+  const requested=JSON.parse(row.payload);
+  requireValue(order.client_order_id===row.client_id&&order.symbol===requested.symbol&&order.side===requested.side&&Number(order.qty)===Number(requested.qty)&&Number.isFinite(Number(order.filled_qty))&&Number(order.filled_qty)>=0&&Number(order.filled_qty)<=Number(requested.qty),'券商回报与委托不一致',409,'RECEIPT_MISMATCH');
   const clean=cleanOrder(order);
   await db.batch([db.prepare('UPDATE orders SET broker_id=?,status=?,broker_data=?,error=NULL,updated_at=? WHERE client_id=?').bind(order.id,order.status,JSON.stringify(clean),nowISO(),row.client_id),await auditStatement(db,actor,kind,row.client_id,{status:order.status,filled_qty:order.filled_qty,broker_id:order.id})]);
   console.info(JSON.stringify({event:'paper_order_receipt',observed_at:nowISO(),action:kind,environment:env.DEMO_MODE==='local-fixture'?'Local broker fixture':'Alpaca Paper',client_order_id:row.client_id,broker_order_id:clean.id,symbol:clean.symbol,side:clean.side,status:clean.status,filled_qty:clean.filled_qty,filled_avg_price:clean.filled_avg_price,filled_at:clean.filled_at}));
@@ -89,16 +94,19 @@ async function reconcileOne(env,db,row,actor){
 async function submitOrder(env,db,user,input,plan=null,automation=null){
   requireValue(input.confirm===true,'请在网页订单摘要中确认提交');
   requireValue(typeof input.idempotency_key==='string'&&/^[a-f0-9-]{36}$/.test(input.idempotency_key),'缺少有效幂等键');
-  const order=normalizeOrder(input),hash=await digest({...order,allow_queued:input.allow_queued===true}),clientId='qs_'+input.idempotency_key.replaceAll('-','');
+  const portfolio=automation?.portfolio===true;
+  const order=normalizeOrder(input,portfolio?instrumentSymbol(input.symbol,'US'):null),hash=await digest({...order,allow_queued:input.allow_queued===true}),clientId='qs_'+input.idempotency_key.replaceAll('-','');
   const lease=await acquire(db);
   try{
+    await portfolioGuard(db,'US',portfolio?automation:null);
     let row=await first(db,'SELECT * FROM orders WHERE client_id=?',clientId);
     if(row){
       requireValue(row.request_hash===hash,'同一幂等键不能用于不同订单',409,'IDEMPOTENCY_CONFLICT');
       if(!TERMINAL.includes(row.status)){const found=await reconcileOne(env,db,row,user.id);if(found)return {ok:found.status!=='rejected',reused:true,order:found};}
       return {ok:!UNCERTAIN.includes(row.status)&&row.status!=='rejected',reused:true,order:row.broker_data?JSON.parse(row.broker_data):{client_order_id:row.client_id,status:row.status},message:row.error||'该订单已处理，不会重复提交'};
     }
-    await autoGuard(db,order,automation);
+    await portfolioGuard(db,'US',portfolio?automation:null);
+    await autoGuard(db,order,portfolio?null:automation);
     if(plan)requireValue(Date.now()<=Date.parse(plan.expires_at),'订单计划已过期，请重新生成',409,'PLAN_EXPIRED');
     const uncertain=await first(db,"SELECT client_id FROM orders WHERE status IN ('submitting','unknown') LIMIT 1");
     requireValue(!uncertain,'存在状态未知的订单，必须先对账',409,'UNRESOLVED_ORDER');
@@ -119,7 +127,8 @@ async function submitOrder(env,db,user,input,plan=null,automation=null){
     row=await first(db,'SELECT * FROM orders WHERE client_id=?',clientId);
     const latest=await control(db);
     if(latest.halted){await run(db,"UPDATE orders SET status='rejected',error=?,updated_at=? WHERE client_id=?",'暂停发生在发送前',nowISO(),clientId);throw new AppError('服务器已暂停，此订单未发送',409,'HALTED');}
-    try{await autoGuard(db,order,automation);}catch(e){await run(db,"UPDATE orders SET status='rejected',error=?,updated_at=? WHERE client_id=?",e.message,nowISO(),clientId);throw e;}
+    try{await portfolioGuard(db,'US',portfolio?automation:null);
+    await autoGuard(db,order,portfolio?null:automation);}catch(e){await run(db,"UPDATE orders SET status='rejected',error=?,updated_at=? WHERE client_id=?",e.message,nowISO(),clientId);throw e;}
     let placed;
     try{placed=await broker(env,'/v2/orders',{method:'POST',payload:{...order,client_order_id:clientId}});}
     catch(e){
@@ -136,7 +145,7 @@ async function submitOrder(env,db,user,input,plan=null,automation=null){
       }
     }
     const result=await saveBrokerOrder(env,db,row,placed,user.id,'order_submitted');
-    const stopped=(await control(db)).halted || Boolean(automation && await autoGuard(db,order,automation).then(()=>false,()=>true));
+    const stopped=(await control(db)).halted || Boolean(automation && await (portfolio?portfolioGuard(db,'US',automation):autoGuard(db,order,automation)).then(()=>false,()=>true));
     if(stopped&&!TERMINAL.includes(placed.status)){
       try{await broker(env,'/v2/orders/'+encodeURIComponent(placed.id),{method:'DELETE'});await audit(db,user.id,'halt_cancel_requested',clientId,{broker_id:placed.id});}catch{await audit(db,user.id,'halt_cancel_uncertain',clientId,{broker_id:placed.id});}
     }
@@ -293,6 +302,21 @@ async function overview(env,db){
   const local=await all(db,'SELECT client_id,status,broker_id,payload,broker_data,error,created_at,updated_at FROM orders ORDER BY created_at DESC LIMIT 100');
   return {ok:Object.keys(errors).length===0,fetched_at:nowISO(),...out,control:publicControl(c),local_orders:local.map(r=>({...r,payload:JSON.parse(r.payload),broker_data:r.broker_data?JSON.parse(r.broker_data):null})),errors,source:env.DEMO_MODE==='local-fixture'?'本地券商替身 / 历史行情快照':'Alpaca Paper / IEX',demo_mode:env.DEMO_MODE==='local-fixture',refresh_seconds:15};
 }
+const portfolioCatalog=buildPortfolioCatalog(JSON.parse(MODULAR_DAILY_RESULTS),JSON.parse(DAILY_REFINEMENT));
+const portfolio=createPortfolio({catalog:portfolioCatalog,audit,adapters:{
+ US:{
+  async exclusive(db,fn){const lease=await acquire(db);try{return await fn();}finally{await release(db,lease);}},
+  async available(env,db){requireValue(!await first(db,"SELECT client_id FROM orders WHERE status IN ('unknown','submitting') LIMIT 1"),'存在未知订单，请先对账',409,'UNRESOLVED_ORDER');const c=await control(db);requireValue(!c.halted,'请先对账并恢复美股交易',409,'HALTED');const old=await first(db,'SELECT enabled FROM auto_strategy WHERE id=1');requireValue(!old?.enabled,'请先暂停原单标的自动策略',409);},
+  async snapshot(env,db,symbols){
+   const ctx=await accountContext(env);requireValue(ctx.account.currency==='USD','账户必须以 USD 计价',409);requireValue(ctx.account.status==='ACTIVE'&&!ctx.account.trading_blocked&&!ctx.account.account_blocked,'模拟账户当前不可交易',409,'ACCOUNT_BLOCKED');
+   const quotes={};if(ctx.clock.is_open)for(const symbol of symbols){await requireCourseAsset(env,symbol);const q=await snapshotQuote(env,symbol),age=Date.now()-Date.parse(q.t);requireValue(age>=-5000&&age<=120000&&Number(q.ap)>0&&Number(q.bp)>0&&Number(q.ap)>=Number(q.bp),'实时报价过期：'+symbol,409,'STALE_QUOTE');quotes[symbol]={price:(Number(q.ap)+Number(q.bp))/2,lot:1,tradable:true};}
+   return {tag:await digest('alpaca:'+env.ALPACA_PAPER_API_KEY),cash:Number(ctx.account.cash),is_open:ctx.clock.is_open,pending:ctx.openOrders.length>0,positions:ctx.positions.map(p=>({symbol:p.symbol,qty:Number(p.qty)})),quotes};
+  },
+  async reconcile(env,db){requireValue((await reconcile(env,db,{id:'portfolio'})).ok,'账户对账失败',409,'RECONCILIATION_FAILED');},
+  async ledger(db,s){return (await all(db,'SELECT * FROM orders WHERE actor=?','portfolio:'+s.run_id)).map(o=>{const b=o.broker_data?JSON.parse(o.broker_data):null,p=JSON.parse(o.payload);return {key:o.client_id.replace(/^qs_/,''),symbol:p.symbol,side:p.side,filled:Number(b?.filled_qty||0),price:Number(b?.filled_avg_price||0)};});},
+  async submit(env,db,s,o){return submitOrder(env,db,{id:'portfolio:'+s.run_id},{symbol:o.symbol,side:o.side,qty:o.qty,type:'limit',limit_price:o.price,time_in_force:'day',confirm:true,idempotency_key:o.key},null,{portfolio:true,run_id:s.run_id,revision:s.revision});}
+ },HK:hkPortfolioAdapter
+}});
 async function route(request,env){
   const url=new URL(request.url),path=url.pathname,method=request.method;
   if(!path.startsWith('/api/')){
@@ -305,6 +329,9 @@ async function route(request,env){
   const db=database(env);
   if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);await verifyScheduler(request,env);const result=await scheduledTick(env,db,'github');console.info(JSON.stringify({event:'scheduler_tick',source:'github',at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
   if(method==='GET'){
+    if(path==='/api/v1/portfolio/catalog')return json({ok:true,strategies:[...portfolioCatalog.values()].map(({report,...e})=>e)});
+    if(path==='/api/v1/portfolio/report'){const e=portfolioCatalog.get(url.searchParams.get('id'));requireValue(e,'策略不存在',404);if(url.searchParams.get('source')==='latest'){const r=await first(db,"SELECT payload FROM artifacts WHERE kind='portfolio_backtest' AND name=? ORDER BY created_at DESC LIMIT 1",e.id);requireValue(r,'尚未导入该策略的重放回测',404);return json({ok:true,...e,...JSON.parse(r.payload)});}return json({ok:true,...e});}
+    if(path==='/api/v1/portfolio'){await operator(request,env,db);return json(await portfolio.state(db));}
     if(path==='/api/v1/longbridge/trading'){await operator(request,env,db);return json(await tradingState(env,db));}
     if(path==='/api/v1/longbridge/status'){await operator(request,env,db);return json(await connectionStatus(env,db));}
     if(path==='/api/v1/longbridge/overview'){await operator(request,env,db);return json(await connectionOverview(env,db));}
@@ -329,6 +356,23 @@ async function route(request,env){
   if(path==='/api/v1/auth/login'){const result=await login(request,env,db,input,auditStatement);return json(result.body,200,result.headers);}
   if(path==='/api/v1/auth/logout'){const result=await logout(request,env,db,auditStatement);return json(result.body,200,result.headers);}
   const user=await operator(request,env,db);
+  if(path==='/api/v1/portfolio/backtests'){
+   const e=portfolioCatalog.get(input.signal?.strategy_id),r=input.backtest,dates=input.dates;
+   requireValue(e&&input.signal.strategy_version===e.version,'策略版本无效');
+   requireValue(['selection','timing','allocation','risk_policy'].every(k=>(input.config?.[k]||null)===(e.config[k]||null)),'回测配置与注册策略不一致');
+   requireValue(Array.isArray(dates)&&dates.length>1&&dates.length<=10000&&dates.every((d,i)=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&(!i||d>dates[i-1])),'回测日期无效');
+   requireValue(r&&Array.isArray(r.equity)&&r.equity.length===dates.length&&r.equity.every(n=>typeof n==='number'&&Number.isFinite(n)&&n>0)&&['cagr_pct','max_drawdown_pct','total_return_pct'].every(k=>typeof r.full?.[k]==='number'&&Number.isFinite(r.full[k])),'回测曲线或指标无效');
+   const payload={report:{equity:r.equity,dates,full:r.full},source:'导入的同规则重放回测 · 数据摘要 '+String(input.signal.data_digest).slice(0,16)+' · '+String(input.note||'').slice(0,300)};
+   return json({ok:true,id:await saveArtifact(db,user,'portfolio_backtest',e.id,payload)});
+  }
+  if(path==='/api/v1/portfolio/signals')return json(await portfolio.ingest(db,user,input));
+  if(path==='/api/v1/portfolio/quotes')return json(await portfolio.quotes(db,user,input));
+  if(path==='/api/v1/portfolio/start')return json(await portfolio.start(env,db,user,input));
+  if(path==='/api/v1/portfolio/pause')return json(await portfolio.pause(db,user,input.market));
+  if(path==='/api/v1/portfolio/resume')return json(await portfolio.resume(env,db,user,input));
+  if(path==='/api/v1/portfolio/liquidate')return json(await portfolio.liquidate(env,db,user,input));
+  if(path==='/api/v1/portfolio/release')return json(await portfolio.release(env,db,user,input));
+  if(path==='/api/v1/portfolio/tick')return json(await portfolio.tick(env,db,input.market));
   if(path==='/api/v1/longbridge/connect')return json(await changeHKConnection(db,()=>saveConnection(env,db,user,input,auditStatement)));
   if(path==='/api/v1/longbridge/disconnect'){requireValue(input.confirm===true,'请确认移除长桥连接');return json(await changeHKConnection(db,()=>removeConnection(db,user,auditStatement)));}
   if(path==='/api/v1/longbridge/control')return json(await setTrading(env,db,user,input));
@@ -389,5 +433,5 @@ async function route(request,env){
   throw new AppError('接口不存在',404,'NOT_FOUND');
 }
 const auto=createAutomation({accountContext,history,snapshotQuote,requireCourseAsset,submitOrder,reconcile,audit,auditStatement,artifact,control,cancelOrders,acquire,release,saveArtifact});
-async function scheduledTick(env,db,source){const results=await Promise.allSettled([auto.tick(env,db,source),tickHK(env,db,source)]);if(results[0].status==='rejected')throw results[0].reason;const result=results[0].value;result.longbridge=results[1].status==='fulfilled'?results[1].value:{ok:false,outcome:'fault',message:'长桥调度异常，请核对后恢复'};return result;}
+async function scheduledTick(env,db,source){const results=await Promise.allSettled([auto.tick(env,db,source),tickHK(env,db,source),portfolio.tick(env,db,'US'),portfolio.tick(env,db,'HK')]);if(results[0].status==='rejected')throw results[0].reason;const result=results[0].value;result.longbridge=results[1].status==='fulfilled'?results[1].value:{ok:false,outcome:'fault',message:'长桥调度异常，请核对后恢复'};result.portfolios=results.slice(2).map(r=>r.status==='fulfilled'?r.value:{ok:false,outcome:'fault'});result.ok=result.ok!==false&&result.longbridge.ok!==false&&result.portfolios.every(r=>r.ok!==false);return result;}
 export default {async scheduled(event,env){requireValue(env.SCHEDULER_NATIVE==='true','原生调度未启用',503);const db=database(env);return scheduledTick(env,db,'cloudflare');},async fetch(request,env){const requestId=crypto.randomUUID();try{const response=await route(request,env);response.headers.set('x-request-id',requestId);return response;}catch(error){const known=error instanceof AppError;const response=json({ok:false,error:known?error.message:'服务暂时不可用，新增交易已阻断；请稍后重试。',code:known?error.code:'SERVICE_UNAVAILABLE',request_id:requestId},known?error.status:503);response.headers.set('x-request-id',requestId);if(!known)console.error('request_failed',requestId,error?.name||'Error');return response;}}};

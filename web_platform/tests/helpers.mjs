@@ -17,7 +17,7 @@ export const TEST_LOGIN={username:'course_test',password:'fixture-only-password-
 const TEST_PASSWORD_RECORD='{"version":1,"iterations":100000,"salt":"bTVAWrQmnE4kq5ANnxB6ZVqnqbVv9qYHSItIxnUBT-U","hash":"Sh3y0ydmvh_wqBu9E0i1thcyJ3k2uBNTOQ_QOfW8L2A"}';
 export class Broker {
   constructor(){
-    this.calls=[];this.orders=new Map();this.account={status:'ACTIVE',equity:'100000',last_equity:'100000',cash:'100000',buying_power:'200000',long_market_value:'0',short_market_value:'0',trading_blocked:false,account_blocked:false};
+    this.calls=[];this.orders=new Map();this.account={currency:'USD',status:'ACTIVE',equity:'100000',last_equity:'100000',cash:'100000',buying_power:'200000',long_market_value:'0',short_market_value:'0',trading_blocked:false,account_blocked:false};
     this.clock={is_open:true,timestamp:new Date().toISOString(),next_open:new Date(Date.now()+86400000).toISOString(),next_close:new Date(Date.now()+3600000).toISOString()};this.positions=[];this.historical=bars();this.onPost=null;this.onGet=null;this.lookupMissing=false;
     this.quote={latestQuote:{t:this.clock.timestamp,ap:100.02,bp:99.98},latestTrade:{t:this.clock.timestamp,p:100},dailyBar:{t:new Date(Date.now()-86400000).toISOString(),c:100},prevDailyBar:{t:new Date(Date.now()-2*86400000).toISOString(),c:99}};
   }

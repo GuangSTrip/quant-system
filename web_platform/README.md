@@ -1,3 +1,7 @@
+# 当前组合策略入口
+
+新增「组合策略」：178 个日线组合的历史/重放回测、美股及港股自动模拟执行、信号生产器和增量迁移 0005。具体范围、接口、验证与后续接入步骤见 [组合交付说明](../docs/PORTFOLIO_INTEGRATION_2026-09-19.md)。本轮只交付代码，没有发布网站。
+
 # Quant System 课程模拟交易平台
 
 公开站点：https://quant-system-course-dashboard.able-stork-1502.chatgpt.site

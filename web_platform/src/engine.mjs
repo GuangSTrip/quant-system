@@ -111,8 +111,8 @@ export function backtest(raw,input){
   const last=curve.at(-1),elapsed=(Date.parse(last.t)-Date.parse(curve[0].t))/86400000;
   return {engine:ENGINE_VERSION,config:c,signal:signalAt(bars,bars.length-1,c),signal_timestamp:bars.at(-1).t,metrics:{total_return:last.equity/100000-1,cagr:elapsed>0?(last.equity/100000)**(365.25/elapsed)-1:0,sharpe:sd?mean/sd*Math.sqrt(252):0,max_drawdown:Math.min(...curve.map(x=>x.drawdown)),volatility:sd*Math.sqrt(252),var95,cvar95:tail.reduce((s,x)=>s+x,0)/tail.length,turnover:turnover/100000,total_cost:totalCost,trade_count:trades.length},curve,trades,quality:{rows:bars.length,from:bars[0].t,to:bars.at(-1).t,duplicates:0,invalid:0},limitations:['单标的日频、只做多；不模拟股息、税费、市场冲击与部分成交。','信号只读取前一根完整日线，下一根开盘成交；市场休市、停牌和跳空由输入数据决定。','IEX 单交易所行情与券商实际撮合行情可能不同；成本为可配置的单边比例成本。']};
 }
-export function normalizeOrder(input){
-  const o={symbol:symbol(input.symbol),side:String(input.side),type:String(input.type),qty:String(numeric(input.qty,'股数',1,10000)),time_in_force:String(input.time_in_force||'day')};
+export function normalizeOrder(input,validatedSymbol=null){
+  const o={symbol:validatedSymbol||symbol(input.symbol),side:String(input.side),type:String(input.type),qty:String(numeric(input.qty,'股数',1,10000)),time_in_force:String(input.time_in_force||'day')};
   requireValue(Number.isInteger(Number(o.qty)),'课程版订单使用整数股');
   requireValue(['buy','sell'].includes(o.side),'方向无效');
   requireValue(['market','limit','stop','stop_limit'].includes(o.type),'订单类型无效');

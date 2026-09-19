@@ -44,12 +44,12 @@ class Study:
     metadata:dict
     dead:np.ndarray
 
-def load_international(market):
-    folder=ROOT/'data'/'modular_daily'/market
+def load_international(market,end_date='2026-09-17',data_root=None):
+    folder=(data_root or ROOT/'data'/'modular_daily')/market
     frames={p.name.removesuffix('.csv.gz'):pd.read_csv(p).set_index('date') for p in sorted(folder.glob('*.csv.gz'))}
     if len(frames)<30: raise ValueError(f'{market}: fewer than 30 accepted histories')
     dates=sorted(set().union(*(set(f.index) for f in frames.values())))
-    dates=[d for d in dates if '2024-01-01'<=d<='2026-09-17']
+    dates=[d for d in dates if '2024-01-01'<=d<=end_date]
     def col(key):return np.column_stack([f.reindex(dates)[key].to_numpy(float) for f in frames.values()])
     c=col('close'); o=col('open'); v=col('volume')
     return Panel(dates,list(frames),o,c,pd.DataFrame(c).ffill().to_numpy(),v,c*v)
@@ -71,7 +71,7 @@ def rank(values,valid):
     out[ids]=pd.Series(values[ids]).rank(pct=True,method='average').to_numpy()
     return out
 
-def prepare(market):
+def prepare(market,end_date='2026-09-17',data_root=None):
     warnings.filterwarnings('ignore',category=RuntimeWarning)
     if market=='CN':
         panel,list_dates,manifest=load_cn()
@@ -79,7 +79,7 @@ def prepare(market):
         recs={r['ts_code']:r for r in access['CN_listed']+access['CN_delisted']}
         dead=np.array([int(str(recs[s].get('delist_date') or '99991231')) for s in panel.symbols])
     else:
-        panel=load_international(market); list_dates=None; dead=np.full(len(panel.symbols),99991231)
+        panel=load_international(market,end_date,data_root); list_dates=None; dead=np.full(len(panel.symbols),99991231)
     c=pd.DataFrame(panel.valuation)
     returns=c.pct_change(fill_method=None).replace([np.inf,-np.inf],np.nan)
     f={'vol':returns.rolling(120,min_periods=100).std().to_numpy()*np.sqrt(252),
@@ -130,7 +130,7 @@ def prepare(market):
           'selection_history':selection_info,
           'fundamental_snapshots':len(fundamental)}
     if market!='CN':
-        manifest=json.loads((ROOT/'data'/'modular_daily'/(market+'_manifest.json')).read_text(encoding='utf8'))
+        manifest=json.loads(((data_root or ROOT/'data'/'modular_daily')/(market+'_manifest.json')).read_text(encoding='utf8'))
         meta.update(listed_candidates=manifest['listed_candidates'],requested=manifest['requested'])
     print('prepared',market,meta['symbols'],meta['sessions'],flush=True)
     return Study(market,panel,f,selected,meta,dead)
@@ -191,11 +191,51 @@ def apply_risk_policy(study,day,weights,policy,equity,peak):
     else:raise ValueError('Unknown risk policy: '+str(policy))
     return result
 
-def simulate(study,selection,timing,allocation,cost_multiplier=1.,risk_policy=None,execution_lag=1):
+@dataclass
+class DecisionState:
+    """Replayable close state. Day indices always refer to the fixed input origin."""
+    ids: np.ndarray
+    active: np.ndarray
+    target: np.ndarray
+    decision_day: int = -1
+
+    @classmethod
+    def empty(cls, size):
+        return cls(np.array([], dtype=int), np.zeros(size, dtype=bool), np.zeros(size))
+
+    def export(self, symbols):
+        return {"selected": [symbols[i] for i in self.ids],
+                "active": [symbols[i] for i in np.flatnonzero(self.active)],
+                "target": dict(zip(symbols, self.target.tolist())),
+                "decision_day": self.decision_day}
+
+
+def decide_close(study, day, selection, timing, allocation, state, equity, peak, risk_policy=None):
+    """The single decision kernel used by historical fills and paper signal export."""
+    if timing not in TIMINGS or allocation not in ALLOCATIONS:
+        raise ValueError("Unknown timing/allocation")
+    p = study.panel
+    reselect = day in study.selections[selection]
+    ids = study.selections[selection][day] if reselect else state.ids
+    permitted = np.zeros(len(p.symbols), dtype=bool)
+    permitted[ids] = True
+    if timing == 'monthly': active = permitted
+    elif timing == 'trend': active = permitted & (p.valuation[day] > study.features['sma'][day])
+    else:
+        active = (state.active | (p.valuation[day] > study.features['entry'][day])) & permitted
+        active &= p.valuation[day] >= study.features['exit'][day]
+    change = not np.array_equal(active, state.active)
+    recalc = reselect or change or ((allocation.startswith('vol') or risk_policy) and (day-START)%5 == 0) or risk_policy == 'cushion07'
+    target = state.target.copy()
+    if recalc:
+        target = apply_risk_policy(study, day, allocate(study, day, ids, active, allocation), risk_policy, equity, peak)
+    return DecisionState(ids.copy(), active.copy(), target, day if recalc else state.decision_day), bool(recalc)
+
+def simulate(study,selection,timing,allocation,cost_multiplier=1.,risk_policy=None,execution_lag=1,trace=None):
     if execution_lag<1:raise ValueError('Signals must execute after the signal session')
     p=study.panel; n=len(p.symbols); units=np.zeros(n); cash=CASH; queue={}; peak=CASH
     curve=[]; weight_curve=[]; count=0; costs=0.; turnover=0.; annual=[]; active=np.zeros(n,dtype=bool)
-    ids=np.array([],dtype=int); previous_active=active.copy(); gross_sum=0.; capital_loss=0.
+    state=DecisionState.empty(n); gross_sum=0.; capital_loss=0.
     fee={'CN':.0015,'HK':.002,'US':.001}[study.market]*cost_multiplier
     for day in range(START,len(p.dates)):
         # Known delisting effective date: conservatively write remaining inventory down to zero.
@@ -209,20 +249,13 @@ def simulate(study,selection,timing,allocation,cost_multiplier=1.,risk_policy=No
         peak=max(peak,equity)
         curve.append({'date':p.dates[day],'equity':float(equity)})
         weight_curve.append(float(gross));gross_sum+=gross
-        reselect=day in study.selections[selection]
-        if reselect:ids=study.selections[selection][day]
-        permitted=np.zeros(n,dtype=bool);permitted[ids]=True
-        if timing=='monthly':active=permitted
-        elif timing=='trend':active=permitted & (p.valuation[day]>study.features['sma'][day])
-        else:
-            active=(active | (p.valuation[day]>study.features['entry'][day])) & permitted
-            active &= p.valuation[day]>=study.features['exit'][day]
-        change=not np.array_equal(active,previous_active)
-        recalc=reselect or change or ((allocation.startswith('vol') or risk_policy) and (day-START)%5==0) or risk_policy=='cushion07'
-        if recalc:
-            target=allocate(study,day,ids,active,allocation)
-            queue[day+execution_lag]=apply_risk_policy(study,day,target,risk_policy,equity,peak)
-        previous_active=active.copy()
+        state, recalc = decide_close(study,day,selection,timing,allocation,state,equity,peak,risk_policy)
+        if recalc: queue[day+execution_lag] = state.target.copy()
+        if trace is not None:
+            event={'date':p.dates[day], 'equity':float(equity), 'peak':float(peak),
+                   'rebalanced':recalc, 'state':state.export(p.symbols)}
+            if callable(trace): trace(event)
+            else: trace.append(event)
     split=next(i for i,r in enumerate(curve) if r['date']>='2026-01-01')
     return {'full':metrics(curve),'development':metrics(curve[:split]),'review':metrics(curve,'2026-01-01'),
             'equity':[round(r['equity']/CASH,6) for r in curve],
