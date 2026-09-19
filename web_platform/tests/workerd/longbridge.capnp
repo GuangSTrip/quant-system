@@ -5,7 +5,8 @@ const config :Workerd.Config = (
     modules = [
       (name = "longbridge-test.mjs", esModule = embed "longbridge-test.mjs"),
       (name = "longbridge.mjs", esModule = embed "../../src/longbridge.mjs"),
-      (name = "engine.mjs", esModule = embed "../../src/engine.mjs")
+      (name = "minute-rules.mjs", esModule = embed "../../src/minute-rules.mjs"),
+        (name = "engine.mjs", esModule = embed "../../src/engine.mjs")
     ]
   ))]
 );

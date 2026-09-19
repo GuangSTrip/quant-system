@@ -6,6 +6,7 @@ const config :Workerd.Config = (
       modules = [
         (name = "transport-test.mjs", esModule = embed "transport-test.mjs"),
         (name = "transport.mjs", esModule = embed "../../src/transport.mjs"),
+        (name = "minute-rules.mjs", esModule = embed "../../src/minute-rules.mjs"),
         (name = "engine.mjs", esModule = embed "../../src/engine.mjs")
       ],
       globalOutbound = (name = "alpaca-fixture")
