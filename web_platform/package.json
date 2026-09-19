@@ -11,7 +11,10 @@
     "deploy:verify": "node scripts/deploy.mjs --verify",
     "deploy:check": "node scripts/deploy.mjs --dry-run",
     "password:reset": "node scripts/deploy.mjs --reset-password",
-    "test:runtime": "workerd test tests/workerd/transport.capnp && workerd test tests/workerd/auth.capnp"
+    "test:runtime": "workerd test tests/workerd/transport.capnp && workerd test tests/workerd/auth.capnp",
+    "local:setup": "node scripts/setup-local-paper.mjs",
+    "local:migrate": "wrangler d1 migrations apply DB --local --config wrangler.local.json",
+    "local:paper": "wrangler dev --local --ip 127.0.0.1 --port 8792 --config wrangler.local.json"
   },
   "devDependencies": {
     "drizzle-kit": "0.31.10",

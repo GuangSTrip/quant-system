@@ -8,7 +8,7 @@ test('all three strategies run for each market and preserve sample provenance',(
   assert.equal(demo.reports.length,9);
   for(const market of ['US','HK','CN'])for(const strategy of LIBRARY_STRATEGIES){
     const report=demo.reports.find(x=>x.market===market&&x.type===strategy.id);
-    assert.ok(report);assert.equal(report.days,5);assert.ok(report.rows>=1000);
+    assert.ok(report);assert.ok(report.days>=19);assert.ok(report.rows>=1000);
     assert.equal(report.sampleKind,'historical');
     assert.ok(Number.isFinite(report.net));assert.ok(Number.isFinite(report.baselineNet));
     assert.ok(report.equityCurve.length>100);
@@ -39,7 +39,7 @@ test('advanced candidate uses the same causal execution and survives cost stress
   const raw=JSON.parse(readFileSync(new URL('../demo-data/SPY-1Min-snapshot.json',import.meta.url),'utf8'));
   const basic=runMinuteResearch(raw.bars,{market:'US',symbol:'SPY',type:'volume_vwap_breakout',budget:2000});
   const stressed=runMinuteResearch(raw.bars,{market:'US',symbol:'SPY',type:'volume_vwap_breakout',budget:2000,costMultiplier:2});
-  assert.equal(basic.days,5);
+  assert.equal(basic.days,new Set(raw.bars.map(b=>b.t.slice(0,10))).size);
   assert.equal(stressed.costBps,20);
   assert.ok(stressed.net<=basic.net);
   for(const order of basic.orders.filter(x=>x.reason.includes('强制平仓'))){

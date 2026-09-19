@@ -5,7 +5,7 @@ import {runMinuteResearch,LIBRARY_STRATEGIES} from '../src/minute-library.mjs';
 
 const spy=JSON.parse(await readFile(new URL('../demo-data/SPY-1Min-snapshot.json',import.meta.url),'utf8'));
 const inputs=[
-  {market:'US',symbol:'SPY',bars:spy.bars,source:'Yahoo Finance Chart 公开历史快照',note:'真实短样本；仅 5 个交易日，不足以判断长期表现。',sampleKind:'historical',fetchedAt:spy.fetched_at},
+  {market:'US',symbol:'SPY',bars:spy.bars,source:'Yahoo Finance Chart 公开历史快照',note:'真实近期分钟样本；不足以判断长期表现。',sampleKind:'historical',fetchedAt:spy.fetched_at},
   ...await Promise.all(['HK','CN'].map(async market=>{const s=JSON.parse(await readFile(new URL('../demo-data/'+market+'-1Min-snapshot.json',import.meta.url),'utf8'));return {market,symbol:s.symbol,bars:s.bars,source:s.source,note:'真实短样本；缺失分钟可能来自无成交、停牌或供应商缺口，不填造行情。',sampleKind:s.sample_kind,fetchedAt:s.fetched_at};}))
 ];
 // Optional local snapshots are excluded from Git so licensed data and API credentials stay local.

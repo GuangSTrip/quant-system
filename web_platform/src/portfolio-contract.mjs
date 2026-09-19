@@ -18,7 +18,7 @@ export function buildPortfolioCatalog(original,refined){
     name:r.label||['selection','timing','allocation'].map(k=>original.rules[k][r[k]].label).join(' × '),
     recommended:extra?.selected&&strategyId(market,extra.selected)===id,
     execution:MARKETS[market].broker?'signal_required':'adapter_required',broker:MARKETS[market].broker,
-    report:{...r,dates:m.dates},source:'历史研究；信号需用最新完整日线重放，收益不等于模拟盘成交'});
+    report:{...r,dates:m.dates,selection_history:m.metadata?.selection_history?.[r.selection]||[]},source:'历史研究；信号需用最新完整日线重放，收益不等于模拟盘成交'});
   }
  }
  return result;
