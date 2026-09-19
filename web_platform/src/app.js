@@ -1,3 +1,7 @@
+import {createReplayUI} from './replay-ui.mjs';
+import {engineReplay,minuteReplay} from './replay-model.mjs';
+import {backtest} from './engine.mjs';
+import classroomSnapshot from './classroom-snapshot.json';
 import {createPortfolioUI} from './portfolio-ui.mjs';
 import {createHKTradingUI} from './longbridge-trading-ui.mjs';
 import {createLongbridgePanel} from './longbridge-ui.mjs';
@@ -8,7 +12,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   const $ = id => document.getElementById(id);
   const dailyWorkbench=createDailyWorkbench($('daily-workbench'),chart);
   const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false,cn:null,cnPending:null};
-  const names = {'cn-trade':'A 股模拟交易',portfolio:'组合回测与自动交易',longbridge:'港股 · 长桥',hk:'富途查询（旧入口）',showcase:'研究概览',library:'分钟策略库',daily:'日线策略研究',overview:'账户总览',strategy:'策略讲解',research:'创建回测',trade:'美股模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
+  const names = {replay:'历史策略回放','cn-trade':'A 股模拟交易',portfolio:'组合回测与自动交易',longbridge:'港股 · 长桥',hk:'富途查询（旧入口）',showcase:'研究概览',library:'分钟策略库',daily:'日线策略研究',overview:'账户总览',strategy:'策略讲解',research:'创建回测',trade:'美股模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const cnTerminal=[...terminal,'done_for_day'];
@@ -36,7 +40,8 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   const longbridgePanel=createLongbridgePanel(api);
   const hkTrading=createHKTradingUI(api);
   const portfolioUI=createPortfolioUI($('portfolio-workbench'),api,chart,()=>Boolean(state.session?.operator));
-  const strategyViews=new Set(['daily','portfolio','research','library','strategy']);
+  const classroomReplay=createReplayUI($('classroom-replay'),chart),libraryReplay=createReplayUI($('library-replay'),chart),researchReplay=createReplayUI($('research-replay'),chart);
+  const strategyViews=new Set(['replay','daily','portfolio','research','library','strategy']);
   let centerCatalog=[],centerChoice='opening_range_breakout',centerFrequency='minute';
   const basicStrategies=[{id:'opening_range_breakout',name:'开盘区间突破',frequency:'minute'},{id:'vwap_reversion',name:'VWAP 均值回归',frequency:'minute'},{id:'adaptive_momentum',name:'波动率自适应动量',frequency:'minute'},{id:'sma',name:'双均线趋势',frequency:'daily'},{id:'momentum',name:'绝对动量',frequency:'daily'},{id:'buy_hold',name:'买入持有',frequency:'daily'},{id:'daily-lab',name:'组合规则对照研究',frequency:'daily'}];
   function centerOptions(){
@@ -47,17 +52,22 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   async function loadCenterCatalog(){try{centerCatalog=(await api('portfolio/catalog')).strategies;centerOptions();}catch{ /* Basic strategies remain available if catalog is offline. */ }}
   function centerTabs(view){
     const combo=centerChoice.includes(':'),lab=centerChoice==='daily-lab',minute=centerFrequency==='minute';
-    const tabs=combo?[['portfolio','回测与组合执行']]:lab?[['daily','规则对照与回测']]:minute?[['library','历史回测报告'],...(centerChoice==='adaptive_momentum'?[]:[['research','配置并回测']])]:[['research','配置并回测'],['strategy','规则讲解']];
+    const tabs=combo?[['portfolio','回测与组合执行']]:lab?[['daily','规则对照与回测']]:minute?[['library','历史回测报告'],...(centerChoice==='adaptive_momentum'?[]:[['research','配置并回测']])]:[['replay','历史回放与总览'],['research','配置并回测'],['strategy','规则讲解']];
     $('center-tabs').replaceChildren(...tabs.map(([target,label])=>{const b=node('button',target===view?'selected':'',label);b.type='button';b.setAttribute('aria-pressed',String(target===view));b.onclick=()=>openCenter(target);return b;}));
-    text('center-capability',combo?'日线组合 · 可查看历史报告、导入重新回测结果，发布信号后授权模拟执行。':lab?'日线组合 · 比较选股、择时和仓位规则，查看既有研究结果。':minute?(centerChoice==='adaptive_momentum'?'分钟级 · 当前支持查看已生成的历史报告，未接入参数化回测。':'分钟级 · 支持历史报告与参数化回测；真实覆盖范围取决于行情数据，合成样本会单独标注。'):'日线 · 支持参数化回测与规则讲解；重新回测需要对应历史行情。');
+    text('center-capability',combo?'日线组合 · 可查看历史报告、导入重新回测结果，发布信号后授权模拟执行。':lab?'日线组合 · 比较选股、择时和仓位规则，查看既有研究结果。':minute?(centerChoice==='adaptive_momentum'?'分钟级 · 当前支持查看已生成的历史报告，未接入参数化回测。':'分钟级 · 支持历史报告与参数化回测；真实覆盖范围取决于行情数据，合成样本会单独标注。'):'日线 · 可直接回放 SPY 冻结历史样本并导出课堂报告；也可配置参数另行回测。');
   }
   function openCenter(target){
     const combo=centerChoice.includes(':'),minute=centerFrequency==='minute';
-    target=target||(combo?'portfolio':centerChoice==='daily-lab'?'daily':minute?'library':'research');
+    target=target||(combo?'portfolio':centerChoice==='daily-lab'?'daily':minute?'library':'replay');
     if(target==='library')$('library-strategy').value=centerChoice==='opening_range_breakout'?'opening_range':centerChoice;
     if(target==='research'){const f=$('research-form').elements;if(f.type.value!==centerChoice){state.report=null;state.plan=null;$('backtest-result').hidden=true;$('plan-panel').hidden=true;$('reuse-snapshot').checked=false;f.name.value=(f.symbol.value||'SPY')+' '+(basicStrategies.find(x=>x.id===centerChoice)?.name||centerChoice);}f.type.value=centerChoice;updateResearchFields();}
     if(target==='strategy'){const f=$('lab-form').elements;f.type.value=centerChoice;f.type.dispatchEvent(new Event('change',{bubbles:true}));}
+    if(target==='replay')loadClassroom();
     showView(target,true);if(combo)portfolioUI.load(centerChoice);
+  }
+  function loadClassroom(){
+    const config={name:'SPY · '+(basicStrategies.find(x=>x.id===centerChoice)?.name||'双均线趋势'),symbol:'SPY',type:['sma','momentum','buy_hold'].includes(centerChoice)?centerChoice:'sma',fast:10,slow:30,allocation:.3,days:1095,cost_bps:10};
+    const r=backtest(classroomSnapshot.bars,config);r.data_source=classroomSnapshot.source+' · SHA256 '+classroomSnapshot.source_sha256.slice(0,16);r.limitations=[classroomSnapshot.adjustment,'冻结样本；初始资金 100,000 USD，目标仓位 30%，单边成本 10 基点。买入持有基准未扣成本。',...r.limitations.filter(x=>!x.includes('IEX'))];classroomReplay.set(engineReplay(r));
   }
   $('center-frequency').onchange=()=>{centerFrequency=$('center-frequency').value;centerOptions();openCenter();};
   $('center-strategy').onchange=()=>{centerChoice=$('center-strategy').value;openCenter();};
@@ -66,7 +76,8 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
     if(view==='strategies'){openCenter();return;}
     const inCenter=strategyViews.has(view);$('strategy-center').hidden=!inCenter;
     if(inCenter&&!fromCenter){
-      if(view==='library'){centerFrequency='minute';centerChoice=$('library-strategy').value==='opening_range'?'opening_range_breakout':$('library-strategy').value;}
+      if(view==='replay'){centerFrequency='daily';if(!['sma','momentum','buy_hold'].includes(centerChoice))centerChoice='sma';loadClassroom();}
+      else if(view==='library'){centerFrequency='minute';centerChoice=$('library-strategy').value==='opening_range'?'opening_range_breakout':$('library-strategy').value;}
       else if(view==='research'){centerChoice=$('research-form').elements.type.value;centerFrequency=['opening_range_breakout','vwap_reversion'].includes(centerChoice)?'minute':'daily';}
       else if(view==='strategy'){centerFrequency='daily';centerChoice=$('lab-form').elements.type.value;}
       else if(view==='daily'){centerFrequency='daily';centerChoice='daily-lab';}
@@ -226,6 +237,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   function renderReportChart(){if(!state.report)return;const drawdown=state.chartMode==='drawdown',matched=Number.isFinite(state.report.metrics.benchmark_return);$('chart-equity').classList.toggle('selected',!drawdown);$('chart-drawdown').classList.toggle('selected',drawdown);chart('report-chart',state.report.curve,drawdown?[{key:'drawdown',name:'回撤',color:'#b44b45'}]:[{key:'equity',name:'策略',color:'#527347'},{key:'benchmark',name:matched?'同预算日内基准':'买入持有基准',color:'#627d9b'}],drawdown?pct:money);}
   function showReport(r,fillForm=false){
     if(!r.baseline){centerChoice=r.config.type;centerFrequency=['opening_range_breakout','vwap_reversion'].includes(centerChoice)?'minute':'daily';centerOptions();centerTabs('research');}
+    researchReplay.set(engineReplay(r));
     state.report=r;state.plan=null;$('backtest-result').hidden=false;$('plan-panel').hidden=true;state.chartMode='equity';text('report-name',r.config.name+(r.baseline?' · 冻结基线':''));
     const m=r.metrics,metrics=[['总收益',pct(m.total_return)],['年化收益',pct(m.cagr)],['夏普（无风险利率 0）',num(m.sharpe)],['最大回撤',pct(m.max_drawdown)],['年化波动',pct(m.volatility)],['日收益 VaR 95%',pct(m.var95)],['交易次数',num(m.trade_count,0)],['累计成本',money(m.total_cost)]];
     $('report-metrics').replaceChildren(...metrics.map(([k,v])=>{const e=node('div');e.append(node('span','',k),node('strong','',v));return e;}));
@@ -270,13 +282,14 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
       $('library-symbol').replaceChildren(...symbols.map(symbol=>{const option=node('option','',symbol);option.value=symbol;return option;}));$('library-symbol').value=selected;
       const r=libraryReports.find(x=>x.market===market&&x.symbol===selected&&x.type===type);
       if(!r)throw Error('缺少该市场策略报告');
+      libraryReplay.set(minuteReplay(r));
       const currency=value=>new Intl.NumberFormat('zh-CN',{style:'currency',currency:r.currency,maximumFractionDigits:2}).format(value);
       const fill=(id,...parts)=>$(id).replaceChildren(...parts.map((x,i)=>node(i?'p':'strong','',x)));
       text('library-warning',r.sampleKind==='historical'?'真实历史分钟样本：覆盖 '+r.days+' 个交易日；仍需核对数据质量并做样本外验证。':'固定种子伪随机合成样本：仅验证代码、市场交易限制和展示流程；盈亏不能作为投资结论。');
       fill('library-data',r.symbol+' · '+({US:'美股',HK:'港股',CN:'A股普通股票'}[market]),'来源：'+r.source,'样本：'+r.days+' 个交易日 / '+r.rows+' 根分钟线',r.from+' 至 '+r.to,r.dataFetchedAt?'抓取于 '+r.dataFetchedAt:'合成演示，无抓取时间');
       fill('library-rule',r.strategyName+' · '+r.level,r.rule,'预算 '+currency(r.budget)+'；单边成本 '+r.costBps+' 基点；交易单位 '+r.lot+' 股。',r.tplus?'A股普通股票 T+1：当日买入不得当日卖出；剩余持仓 '+r.openQty+' 股。':'日内可买卖；样本日收盘前平仓。');
       fill('library-result',(r.sampleKind==='synthetic'?'合成样本账面变动 ':'策略净盈亏 ')+currency(r.net),(r.sampleKind==='synthetic'?'合成样本基准变动 ':'同预算基准净盈亏 ')+currency(r.baselineNet),'策略交易成本 '+currency(r.totalCost)+'；买卖 '+r.orders.length+' 笔',r.note);
-      $('library-compare').replaceChildren(...libraryReports.filter(x=>x.market===market&&x.symbol===selected).map(item=>{const tr=node('tr');for(const value of [item.strategyName,currency(item.net),currency(item.baselineNet),currency(item.totalCost),num(item.orders.length,0),pct(item.maxDrawdown)])tr.append(node('td','',value));const action=node('td'),button=node('button','','查看');button.addEventListener('click',()=>{$('library-strategy').value=item.type;loadLibrary();$('library-detail-select').scrollIntoView({behavior:'smooth',block:'start'});});action.append(button);tr.append(action);return tr;}));
+      $('library-compare').replaceChildren(...libraryReports.filter(x=>x.market===market&&x.symbol===selected).map(item=>{const tr=node('tr');for(const value of [item.strategyName,currency(item.net),currency(item.baselineNet),currency(item.totalCost),num(item.orders.length,0),pct(item.maxDrawdown)])tr.append(node('td','',value));const action=node('td'),button=node('button','','查看');button.addEventListener('click',()=>{$('library-strategy').value=item.type;loadLibrary();$('library-replay').scrollIntoView({behavior:'smooth',block:'start'});});action.append(button);tr.append(action);return tr;}));
       chart('library-equity',r.equityCurve,[{key:'equity',name:'策略',color:'#527347'},{key:'benchmark',name:'同预算基准',color:'#627d9b'}],currency);
       chart('library-drawdown',r.equityCurve,[{key:'drawdown',name:'回撤',color:'#b44b45'}],pct);
       chart('library-price',r.equityCurve,[{key:'price',name:r.symbol+' 价格',color:'#627d9b'}],currency,r.orders);
@@ -284,7 +297,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
       text('library-orders-caption','显示前 '+Math.min(20,r.orders.length)+' / '+r.orders.length+' 笔回测成交；没有券商订单号或真实成交回报。');
       $('library-orders').replaceChildren(...r.orders.slice(0,20).map(o=>{const tr=node('tr');for(const value of [date(o.t),o.side==='buy'?'买入':'卖出',num(o.qty,0),currency(o.price),currency(o.cost),o.reason])tr.append(node('td','',value));return tr;}));
       if(!r.orders.length)emptyTable('library-orders',6,'该短样本没有触发交易。');
-    }catch(error){text('library-warning','报告读取失败：'+error.message);}
+    }catch(error){libraryReplay.clear();text('library-warning','报告读取失败：'+error.message);}
   }
   $('library-strategy').addEventListener('change',()=>{centerChoice=$('library-strategy').value==='opening_range'?'opening_range_breakout':$('library-strategy').value;centerFrequency='minute';centerOptions();centerTabs('library');});
   $('research-form').elements.type.addEventListener('change',()=>{centerChoice=$('research-form').elements.type.value;centerFrequency=['opening_range_breakout','vwap_reversion'].includes(centerChoice)?'minute':'daily';centerOptions();centerTabs('research');});

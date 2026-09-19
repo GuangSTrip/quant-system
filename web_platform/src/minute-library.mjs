@@ -40,6 +40,14 @@ function signal(dayBars,index,type){
   const sigma=Math.sqrt(average(returns.map(x=>x*x))),rise=b.c/recent[0].c-1;
   return rise>Math.max(.0015,sigma*2)&&b.v>average(recent.map(x=>x.v))*1.2?1:rise<0?-1:0;
 }
+function evidence(bars,i,type){
+  if(i<20)return `已有 ${i+1} 根分钟线`;
+  const b=bars[i],f=n=>n.toFixed(3);
+  if(type==='opening_range'){const first=bars.slice(0,15),high=Math.max(...first.map(b=>b.h)),low=Math.min(...first.map(b=>b.l));return `收盘 ${f(b.c)} / 区间上沿 ${f(high)} / 中点 ${f((high+low)/2)}`;}
+  if(type==='vwap_reversion'){const history=bars.slice(0,i+1),v=history.reduce((a,b)=>a+b.v,0),vwap=v?history.reduce((a,b)=>a+b.c*b.v,0)/v:0;return `收盘 ${f(b.c)} / VWAP ${f(vwap)} / 买入线 ${f(vwap*.9985)}`;}
+  const recent=bars.slice(i-20,i),r=recent.slice(1).map((x,j)=>x.c/recent[j].c-1),sigma=Math.sqrt(average(r.map(x=>x*x))),rise=b.c/recent[0].c-1;
+  return `20 分钟涨幅 ${f(rise*100)}% / 波动阈值 ${f(Math.max(.0015,sigma*2)*100)}% / 本分钟量 ${b.v} / 量门槛 ${f(average(recent.map(x=>x.v))*1.2)}`;
+}
 export function runMinuteResearch(raw,{market,type,symbol,budget=100000,costMultiplier=1}={}){
   const spec=LIBRARY_MARKETS[market];if(!spec||![...LIBRARY_STRATEGIES,ADVANCED_MINUTE_STRATEGY].some(x=>x.id===type))throw Error('未知市场或策略');
   if(!Number.isFinite(costMultiplier)||costMultiplier<0)throw Error('成本倍数必须为非负有限数');
@@ -50,19 +58,20 @@ export function runMinuteResearch(raw,{market,type,symbol,budget=100000,costMult
   const days=[];for(const b of bars){if(days.at(-1)?.day!==b.time.day)days.push({day:b.time.day,bars:[]});days.at(-1).bars.push(b);}
   if(days.length<2||days.some(d=>d.bars.length<40))throw Error('每个样本日需至少 40 根分钟线，且至少两个交易日');
   let cash=budget,qty=0,boughtDay='',cost=0,baseline=budget,baselineQty=0,baselineCost=0,peak=budget,maxDrawdown=0;
-  const fee=spec.costBps*costMultiplier/10000,orders=[],curve=[],equityCurve=[];
-  function record(bar,save){
+  const fee=spec.costBps*costMultiplier/10000,orders=[],curve=[],equityCurve=[],decisions=[];
+  function record(bar,save,decision=null){
     const equity=cash+qty*bar.c,benchmark=baseline+baselineQty*bar.c;
     peak=Math.max(peak,equity);const drawdown=equity/peak-1;maxDrawdown=Math.min(maxDrawdown,drawdown);
+    if(decision){decisions.push({t:bar.t,price:bar.c,cash,qty,signal:decision.signal,reason:decision.reason});}
     if(save){const point={t:bar.t,equity,benchmark,drawdown,price:bar.c};if(equityCurve.at(-1)?.t===bar.t)equityCurve[equityCurve.length-1]=point;else equityCurve.push(point);}
   }
-  function execute(side,price,bar,reason){
+  function execute(side,price,bar,reason,signalTime=null){
     const amount=side==='buy'?Math.floor(cash/(price*(1+fee)*spec.lot))*spec.lot:qty;
     if(amount<=0)return;
     const delta=side==='buy'?amount:-amount,charge=amount*price*fee;
     cash-=delta*price+charge;qty+=delta;cost+=charge;
     if(side==='buy')boughtDay=bar.time.day;
-    orders.push({t:bar.t,side,qty:amount,price,cost:charge,reason});
+    orders.push({t:bar.t,signal_t:signalTime,side,qty:amount,price,cost:charge,reason});
   }
   for(const [dayIndex,day] of days.entries()){
     const first=day.bars[0],last=day.bars.at(-1);
@@ -70,21 +79,22 @@ export function runMinuteResearch(raw,{market,type,symbol,budget=100000,costMult
     // The benchmark obeys the same market-specific settlement rule.
     if(spec.tplus&&baselineQty){baseline+=baselineQty*first.o*(1-fee);baselineCost+=baselineQty*first.o*fee;baselineQty=0;}
     if(!baselineQty){baselineQty=Math.floor(baseline/(first.o*(1+fee)*spec.lot))*spec.lot;baseline-=baselineQty*first.o*(1+fee);baselineCost+=baselineQty*first.o*fee;}
-    record(first,true);
+    record(first,true,{signal:0,reason:'新交易日；等待 20 根分钟线预热'+(spec.tplus?'；昨日持仓在今日开盘退出':'')});
     for(let i=1;i<day.bars.length;i++){
       const previous=i-1,decision=signal(day.bars,previous,type),bar=day.bars[i];
-      if(!qty&&decision===1&&(spec.tplus||i<day.bars.length-1))execute('buy',bar.o,bar,([...LIBRARY_STRATEGIES,ADVANCED_MINUTE_STRATEGY].find(x=>x.id===type)).name+'触发');
-      else if(qty&&decision===-1&&(!spec.tplus||boughtDay!==day.day))execute('sell',bar.o,bar,'上一根完整分钟线发出退出信号');
+      if(!qty&&decision===1&&(spec.tplus||i<day.bars.length-1))execute('buy',bar.o,bar,([...LIBRARY_STRATEGIES,ADVANCED_MINUTE_STRATEGY].find(x=>x.id===type)).name+'触发',day.bars[previous].t);
+      else if(qty&&decision===-1&&(!spec.tplus||boughtDay!==day.day))execute('sell',bar.o,bar,'上一根完整分钟线发出退出信号',day.bars[previous].t);
       if(!spec.tplus&&i===day.bars.length-1){
         if(qty)execute('sell',bar.o,bar,'末根分钟线开盘强制平仓');
         baseline+=baselineQty*bar.o*(1-fee);baselineCost+=baselineQty*bar.o*fee;baselineQty=0;
       }
-      record(bar,i%5===0||orders.at(-1)?.t===bar.t);
+      const next=signal(day.bars,i,type),why=i<20?'等待 20 根分钟线预热':next===1?'满足入场条件':next===-1?'满足退出条件':'未触发买卖条件，维持仓位';
+      record(bar,true,{signal:next,reason:why+'；'+evidence(day.bars,i,type)+(spec.tplus&&qty&&boughtDay===day.day?'；T+1 当日持仓不可卖出':'')+(!spec.tplus&&i===day.bars.length-1?'；末根开盘已强制平仓':'')});
     }
     // The final minute's close is unknown before that bar completes; forced
     // liquidation above occurs at its open before equity is marked.
     record(last,true);
     curve.push({day:day.day,equity:cash+qty*last.c,baseline:baseline+baselineQty*last.c});
   }
-  const last=days.at(-1).bars.at(-1);return {market,symbol,type,currency:spec.currency,budget,days:days.length,rows:bars.length,from:bars[0].t,to:last.t,tplus:spec.tplus,lot:spec.lot,costBps:spec.costBps*costMultiplier,net:cash+qty*last.c-budget,baselineNet:baseline+baselineQty*last.c-budget,totalCost:cost,baselineCost,openQty:qty,maxDrawdown,orders,curve,equityCurve};
+  const last=days.at(-1).bars.at(-1);return {market,symbol,type,currency:spec.currency,budget,days:days.length,rows:bars.length,from:bars[0].t,to:last.t,tplus:spec.tplus,lot:spec.lot,costBps:spec.costBps*costMultiplier,net:cash+qty*last.c-budget,baselineNet:baseline+baselineQty*last.c-budget,totalCost:cost,baselineCost,openQty:qty,maxDrawdown,orders,curve,equityCurve,decisions};
 }

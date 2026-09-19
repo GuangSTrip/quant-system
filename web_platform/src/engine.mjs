@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 'course-intraday-1.2.0';
+export const ENGINE_VERSION = 'course-intraday-1.3.0';
 export const SYMBOLS = ['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT'];
 export const INTRADAY_TYPES = ['opening_range_breakout','vwap_reversion'];
 export const INTRADAY_SYMBOLS = ['SPY','QQQ','AAPL','MSFT'];
@@ -70,7 +70,7 @@ function backtestIntraday(raw,c){
   const bars=validateBars(raw).filter(b=>{const m=marketMinute(b.t).minute;return m>=570&&m<960;});
   requireValue(bars.length>=60&&new Set(bars.map(b=>marketMinute(b.t).day)).size>=2,'分钟行情不足：需要至少两个交易日、60 根常规时段分钟线',422,'INSUFFICIENT_DATA');
   let cash=100000,qty=0,peak=cash,costTotal=0,turnover=0,benchCash=100000,benchQty=0,benchCost=0;
-  const curve=[],trades=[],daily=[],fee=c.cost_bps/10000;
+  const curve=[],trades=[],decisions=[],daily=[],fee=c.cost_bps/10000;
   const execute=(delta,price,time,signalTime)=>{if(!delta)return;const gross=Math.abs(delta)*price,cost=gross*fee;cash-=delta*price+cost;qty+=delta;costTotal+=cost;turnover+=gross;trades.push({t:time,signal_t:signalTime,side:delta>0?'buy':'sell',qty:Math.abs(delta),price,cost});};
   for(let i=0;i<bars.length;i++){
     const b=bars[i],day=marketMinute(b.t).day,prev=i?marketMinute(bars[i-1].t).day:null;
@@ -80,19 +80,20 @@ function backtestIntraday(raw,c){
     }
     const endDay=i===bars.length-1||marketMinute(bars[i+1].t).day!==day;
     if(endDay){execute(-qty,b.c,b.t,b.t);const cost=benchQty*b.c*fee;benchCash+=benchQty*b.c-cost;benchCost+=cost;benchQty=0;daily.push(cash/100000);}
+    const closeDecision=intradayDecision(bars,i,c);decisions.push({t:b.t,price:b.c,cash,qty,...closeDecision,reason:closeDecision.reason+(endDay?'；样本日末已按收盘价平仓':'')});
     const equity=cash+qty*b.c;peak=Math.max(peak,equity);curve.push({t:b.t,equity,drawdown:equity/peak-1,benchmark:benchCash+benchQty*b.c});
   }
   const returns=daily.map((e,i)=>e/(i?daily[i-1]:1)-1),n=returns.length,mean=returns.reduce((s,x)=>s+x,0)/n,sd=Math.sqrt(returns.reduce((s,x)=>s+(x-mean)**2,0)/Math.max(n-1,1));
   const sorted=[...returns].sort((a,b)=>a-b),var95=sorted[Math.floor(n*.05)],tail=sorted.filter(x=>x<=var95),elapsed=(Date.parse(bars.at(-1).t)-Date.parse(bars[0].t))/86400000;
   const decision=intradayDecision(bars,bars.length-1,c);
-  return {engine:ENGINE_VERSION,config:c,signal:decision.signal??0,signal_reason:decision.reason,signal_value:decision.value,signal_timestamp:bars.at(-1).t,metrics:{total_return:cash/100000-1,benchmark_return:benchCash/100000-1,benchmark_cost:benchCost,cagr:elapsed>0?(cash/100000)**(365.25/elapsed)-1:0,sharpe:sd?mean/sd*Math.sqrt(252):0,max_drawdown:Math.min(...curve.map(x=>x.drawdown)),volatility:sd*Math.sqrt(252),var95,cvar95:tail.reduce((s,x)=>s+x,0)/tail.length,turnover:turnover/100000,total_cost:costTotal,trade_count:trades.length},curve,trades,quality:{rows:bars.length,from:bars[0].t,to:bars.at(-1).t,duplicates:0,invalid:0},limitations:['分钟历史行情、只做多；收盘前平仓，未模拟股息、税费、冲击和部分成交。','前一根完整分钟线产生信号，下一根开盘价模拟成交；数据中每日最后一根按收盘价强制平仓。','蓝线是同预算、首根开盘买入和末根收盘卖出的日内基准，按同样单边成本计算；它不是跨夜持有。','100,000 美元初始账户中仅使用策略预算。样本少时年化指标仅供演示。']};
+  return {engine:ENGINE_VERSION,config:c,signal:decision.signal??0,signal_reason:decision.reason,signal_value:decision.value,signal_timestamp:bars.at(-1).t,metrics:{total_return:cash/100000-1,benchmark_return:benchCash/100000-1,benchmark_cost:benchCost,cagr:elapsed>0?(cash/100000)**(365.25/elapsed)-1:0,sharpe:sd?mean/sd*Math.sqrt(252):0,max_drawdown:Math.min(...curve.map(x=>x.drawdown)),volatility:sd*Math.sqrt(252),var95,cvar95:tail.reduce((s,x)=>s+x,0)/tail.length,turnover:turnover/100000,total_cost:costTotal,trade_count:trades.length},curve,trades,decisions,quality:{rows:bars.length,from:bars[0].t,to:bars.at(-1).t,duplicates:0,invalid:0},limitations:['分钟历史行情、只做多；收盘前平仓，未模拟股息、税费、冲击和部分成交。','前一根完整分钟线产生信号，下一根开盘价模拟成交；数据中每日最后一根按收盘价强制平仓。','蓝线是同预算、首根开盘买入和末根收盘卖出的日内基准，按同样单边成本计算；它不是跨夜持有。','100,000 美元初始账户中仅使用策略预算。样本少时年化指标仅供演示。']};
 }
 export function backtest(raw,input){
   const c=strategyConfig(input);if(isIntraday(c.type))return backtestIntraday(raw,c);
   const bars=validateBars(raw),warmup=c.type==='buy_hold'?1:c.slow;
   requireValue(bars.length>warmup+20,'历史数据不足：需要慢周期之外至少 20 根完整日线',422,'INSUFFICIENT_DATA');
   let cash=100000,qty=0,peak=cash,priorEquity=cash,priorSignal=0,totalCost=0,turnover=0;
-  const curve=[],trades=[],returns=[]; const fee=c.cost_bps/10000;
+  const curve=[],trades=[],decisions=[],returns=[]; const fee=c.cost_bps/10000;
   for(let i=warmup;i<bars.length;i++){
     const b=bars[i],signal=signalAt(bars,i-1,c);
     if(signal!==priorSignal){
@@ -104,12 +105,15 @@ export function backtest(raw,input){
       priorSignal=signal;
     }
     const equity=cash+qty*b.c;peak=Math.max(peak,equity);returns.push(equity/priorEquity-1);priorEquity=equity;
+    const nextSignal=signalAt(bars,i,c),fast=bars.slice(i-c.fast+1,i+1).reduce((a,x)=>a+x.c,0)/c.fast,slow=bars.slice(i-c.slow+1,i+1).reduce((a,x)=>a+x.c,0)/c.slow;
+    const reason=c.type==='buy_hold'?'买入持有：持续持仓，首次信号后建仓':c.type==='momentum'?`当前收盘 ${b.c.toFixed(2)}，窗口起点 ${bars[i-c.slow+1].c.toFixed(2)}：${nextSignal?'正动量，目标持有':'非正动量，目标空仓'}`:`快均线 ${fast.toFixed(2)} / 慢均线 ${slow.toFixed(2)}：${nextSignal?'快线上方，目标持有':'快线不高于慢线，目标空仓'}`;
+    decisions.push({t:b.t,price:b.c,cash,qty,signal:nextSignal,reason,value:c.type==='sma'?slow:null});
     curve.push({t:b.t,equity,drawdown:equity/peak-1,benchmark:100000*(1-c.allocation+c.allocation*b.c/bars[warmup].o)});
   }
   const n=returns.length,mean=returns.reduce((s,x)=>s+x,0)/n,sd=Math.sqrt(returns.reduce((s,x)=>s+(x-mean)**2,0)/Math.max(n-1,1));
   const sorted=[...returns].sort((a,b)=>a-b),var95=sorted[Math.floor(n*.05)],tail=sorted.filter(x=>x<=var95);
   const last=curve.at(-1),elapsed=(Date.parse(last.t)-Date.parse(curve[0].t))/86400000;
-  return {engine:ENGINE_VERSION,config:c,signal:signalAt(bars,bars.length-1,c),signal_timestamp:bars.at(-1).t,metrics:{total_return:last.equity/100000-1,cagr:elapsed>0?(last.equity/100000)**(365.25/elapsed)-1:0,sharpe:sd?mean/sd*Math.sqrt(252):0,max_drawdown:Math.min(...curve.map(x=>x.drawdown)),volatility:sd*Math.sqrt(252),var95,cvar95:tail.reduce((s,x)=>s+x,0)/tail.length,turnover:turnover/100000,total_cost:totalCost,trade_count:trades.length},curve,trades,quality:{rows:bars.length,from:bars[0].t,to:bars.at(-1).t,duplicates:0,invalid:0},limitations:['单标的日频、只做多；不模拟股息、税费、市场冲击与部分成交。','信号只读取前一根完整日线，下一根开盘成交；市场休市、停牌和跳空由输入数据决定。','IEX 单交易所行情与券商实际撮合行情可能不同；成本为可配置的单边比例成本。']};
+  return {engine:ENGINE_VERSION,config:c,signal:signalAt(bars,bars.length-1,c),signal_timestamp:bars.at(-1).t,metrics:{total_return:last.equity/100000-1,cagr:elapsed>0?(last.equity/100000)**(365.25/elapsed)-1:0,sharpe:sd?mean/sd*Math.sqrt(252):0,max_drawdown:Math.min(...curve.map(x=>x.drawdown)),volatility:sd*Math.sqrt(252),var95,cvar95:tail.reduce((s,x)=>s+x,0)/tail.length,turnover:turnover/100000,total_cost:totalCost,trade_count:trades.length},curve,trades,decisions,quality:{rows:bars.length,from:bars[0].t,to:bars.at(-1).t,duplicates:0,invalid:0},limitations:['单标的日频、只做多；不模拟股息、税费、市场冲击与部分成交。','信号只读取前一根完整日线，下一根开盘成交；市场休市、停牌和跳空由输入数据决定。','IEX 单交易所行情与券商实际撮合行情可能不同；成本为可配置的单边比例成本。']};
 }
 export function normalizeOrder(input,validatedSymbol=null){
   const o={symbol:validatedSymbol||symbol(input.symbol),side:String(input.side),type:String(input.type),qty:String(numeric(input.qty,'股数',1,10000)),time_in_force:String(input.time_in_force||'day')};

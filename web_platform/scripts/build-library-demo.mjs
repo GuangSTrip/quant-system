@@ -41,6 +41,6 @@ for(const input of inputs)for(const strategy of LIBRARY_STRATEGIES){
   const result=runMinuteResearch(input.bars,{market,symbol:input.symbol,type:strategy.id,budget:market==='US'?2000:100000});
   reports.push({...result,strategyName:strategy.name,level:strategy.level,rule:strategy.rule,source:input.source,note:input.note,sampleKind:input.sampleKind,simulationSeed:input.seed??null,dataFetchedAt:input.fetchedAt||null});
 }
-const output={version:2,reports};
-await writeFile(new URL('../src/library-demo.json',import.meta.url),JSON.stringify(output,null,2)+'\n');
+const output={version:3,reports};
+await writeFile(new URL('../src/library-demo.json',import.meta.url),JSON.stringify(output)+'\n');
 console.log('Built three-market library demo: '+reports.length+' reports; '+reports.filter(x=>x.sampleKind==='historical').length+' historical, '+reports.filter(x=>x.sampleKind==='synthetic').length+' synthetic.');

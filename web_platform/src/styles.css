@@ -41,3 +41,6 @@ body[data-current-view="research"] #research-form label:has(select[name="type"])
 @media(max-width:760px){.strategy-center .form-row{display:grid;grid-template-columns:1fr}.strategy-center .segmented button{flex:1}}
 
 [data-cn-only]{display:none!important}body[data-broker-view="cn"] [data-cn-only]{display:block!important}body[data-broker-view="cn"] [data-alpaca-only],body[data-broker-view="cn"] [data-hk-only]{display:none!important}
+
+/* Classroom historical replay */
+.replay-workbench{border-top:3px solid #d8c36a;padding-top:24px}.replay-workbench .notice{background:#fff7cf}.replay-charts{display:grid;grid-template-columns:1fr;gap:6px}.replay-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin:20px 0}.replay-slider{display:block;font-weight:600}.replay-slider input{display:block;width:100%;padding:0;accent-color:#68794d}.replay-time{font-variant-numeric:tabular-nums;font-weight:650}.replay-decision{background:#f4f3e8;border-left:4px solid #83936d;padding:16px 22px;border-radius:8px}.replay-decision p{line-height:1.8}.replay-timeline{display:flex;flex-wrap:wrap;gap:8px;max-height:300px;overflow:auto;padding:12px 0}.replay-workbench pre{white-space:pre-wrap}.replay-workbench details{margin:16px 0}.replay-workbench .chart{min-height:160px}@media(max-width:850px){.replay-charts{grid-template-columns:1fr}.replay-controls button{flex:1 1 130px}}

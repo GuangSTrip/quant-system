@@ -76,6 +76,11 @@ class PortfolioReplayTests(unittest.TestCase):
         out=produce(s,key,session);trace=[];simulate(s,'near_high','breakout','inverse_vol',trace=trace)
         self.assertEqual({t['symbol']:t['weight'] for t in out['signal']['targets']},{symbol:w for symbol,w in trace[-1]['state']['target'].items() if w>0})
         self.assertAlmostEqual(out['signal']['cash_weight']+sum(t['weight'] for t in out['signal']['targets']),1)
+        self.assertEqual([d['t'] for d in out['backtest']['decisions']], out['dates'])
+        self.assertEqual(out['backtest']['decisions'][-1]['targets'], out['signal']['targets'])
+        for row, event in zip(out['backtest']['decisions'], trace):
+            self.assertEqual(row['rebalanced'], event['rebalanced'])
+            self.assertEqual({t['symbol']:t['weight'] for t in row['targets']}, {s:w for s,w in event['state']['target'].items() if w>0})
         s.panel.closes[-1,1]=np.nan
         with self.assertRaisesRegex(ValueError,'Incomplete'):produce(s,key,session)
 

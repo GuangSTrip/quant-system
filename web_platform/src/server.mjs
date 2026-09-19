@@ -380,7 +380,9 @@ async function route(request,env){
    requireValue(['selection','timing','allocation','risk_policy'].every(k=>(input.config?.[k]||null)===(e.config[k]||null)),'回测配置与注册策略不一致');
    requireValue(Array.isArray(dates)&&dates.length>1&&dates.length<=10000&&dates.every((d,i)=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&(!i||d>dates[i-1])),'回测日期无效');
    requireValue(r&&Array.isArray(r.equity)&&r.equity.length===dates.length&&r.equity.every(n=>typeof n==='number'&&Number.isFinite(n)&&n>0)&&['cagr_pct','max_drawdown_pct','total_return_pct'].every(k=>typeof r.full?.[k]==='number'&&Number.isFinite(r.full[k])),'回测曲线或指标无效');
-   const payload={report:{equity:r.equity,dates,full:r.full},source:'导入的同规则重放回测 · 数据摘要 '+String(input.signal.data_digest).slice(0,16)+' · '+String(input.note||'').slice(0,300)};
+   const decisions=r.decisions||[];
+   requireValue(Array.isArray(decisions)&&(!decisions.length||decisions.length===dates.length)&&decisions.every((d,i)=>d&&d.t===dates[i]&&typeof d.rebalanced==='boolean'&&typeof d.reason==='string'&&d.reason.length<=500&&Array.isArray(d.targets)&&d.targets.length<=500&&d.targets.every(t=>t&&typeof t.symbol==='string'&&t.symbol.length<=30&&typeof t.weight==='number'&&Number.isFinite(t.weight)&&t.weight>=0&&t.weight<=1)&&d.targets.reduce((a,t)=>a+t.weight,0)<=1.000001),'逐日决策记录无效');
+   const payload={report:{equity:r.equity,dates,full:r.full,decisions:decisions.map(d=>({t:d.t,rebalanced:d.rebalanced,reason:d.reason,targets:d.targets.map(t=>({symbol:t.symbol,weight:t.weight}))}))},source:'导入的同规则重放回测 · 数据摘要 '+String(input.signal.data_digest).slice(0,16)+' · '+String(input.note||'').slice(0,300)};
    return json({ok:true,id:await saveArtifact(db,user,'portfolio_backtest',e.id,payload)});
   }
   if(path==='/api/v1/portfolio/signals')return json(await portfolio.ingest(db,user,input));
