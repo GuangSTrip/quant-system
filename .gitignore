@@ -11,3 +11,5 @@ data/*
 *.jsonl
 web_platform/daily-preview.*.log
 web_platform/demo-*.log
+
+.myquant_bridge_state.sqlite*

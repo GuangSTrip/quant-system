@@ -7,14 +7,16 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   'use strict';
   const $ = id => document.getElementById(id);
   const dailyWorkbench=createDailyWorkbench($('daily-workbench'),chart);
-  const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false};
-  const names = {portfolio:'组合回测与自动交易',longbridge:'港股 · 长桥',hk:'富途查询（旧入口）',showcase:'研究概览',library:'分钟策略库',daily:'日线策略研究',overview:'账户总览',strategy:'策略讲解',research:'创建回测',trade:'美股模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
+  const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false,cn:null,cnPending:null};
+  const names = {'cn-trade':'A 股模拟交易',portfolio:'组合回测与自动交易',longbridge:'港股 · 长桥',hk:'富途查询（旧入口）',showcase:'研究概览',library:'分钟策略库',daily:'日线策略研究',overview:'账户总览',strategy:'策略讲解',research:'创建回测',trade:'美股模拟交易',risk:'风控与对账',audit:'操作审计',acceptance:'交付验收',automation:'自动策略'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
+  const cnTerminal=[...terminal,'done_for_day'];
   const types = {limit:'限价',market:'市价',stop:'止损市价',stop_limit:'止损限价'};
   const symbolNames={SPY:'标普 500 ETF',QQQ:'纳斯达克 100 ETF',IWM:'美国小盘股 ETF',EFA:'发达市场 ETF',EEM:'新兴市场 ETF',TLT:'长期美债 ETF',IEF:'中期美债 ETF',GLD:'黄金 ETF',DBC:'商品 ETF',SHY:'短期美债 ETF',AAPL:'苹果公司',MSFT:'微软公司'};
   const minuteSymbols=new Set(['SPY','QQQ','AAPL','MSFT']);
   const money = v => v!==null&&v!==undefined&&Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}) : '—';
+  const cny = v => v!==null&&v!==undefined&&Number.isFinite(Number(v)) ? Number(v).toLocaleString('zh-CN',{style:'currency',currency:'CNY',maximumFractionDigits:2}) : '—';
   const num = (v,d=2) => v!==null&&v!==undefined&&Number.isFinite(Number(v)) ? Number(v).toLocaleString('zh-CN',{maximumFractionDigits:d}) : '—';
   const pct = v => v!==null&&v!==undefined&&Number.isFinite(Number(v)) ? (Number(v)*100).toFixed(2)+'%' : '—';
   const date = v => v&&Number.isFinite(Date.parse(v)) ? new Date(v).toLocaleString('zh-CN',{hour12:false,timeZoneName:'short'}) : '—';
@@ -74,13 +76,14 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
 
     if(view==='portfolio'&&!fromCenter)portfolioUI.load().then(()=>{if(document.body.dataset.currentView==='portfolio'){centerChoice=$('pf-strategy').value;centerOptions();centerTabs(view);}});
     if(view==='longbridge'){longbridgePanel.status();hkTrading.status();}
+    if(view==='cn-trade')loadCn();
     if(view==='automation')loadAutomation();
     if(!names[view])view='showcase';
     document.body.dataset.currentView=view;
-    document.body.dataset.brokerView=['longbridge','hk'].includes(view)?'hk':'alpaca';
+    document.body.dataset.brokerView=view==='cn-trade'?'cn':['longbridge','hk'].includes(view)?'hk':'alpaca';
     document.querySelectorAll('.view').forEach(e=>{e.hidden=e.id!=='view-'+view;});
     document.querySelectorAll('[data-view]').forEach(e=>{e.classList.toggle('active',e.dataset.view===(inCenter?'strategies':view));e.setAttribute('aria-current',e.dataset.view===(inCenter?'strategies':view)?'page':'false');});
-    const contexts={showcase:['工作空间','从历史验证到模拟执行，按你的任务开始。'],daily:['研究与回测','比较选股、买卖时机与仓位，理解收益和回撤的来源。'],portfolio:['研究与回测','选择组合、查看历史表现，再授权模拟账户执行。'],research:['研究与回测','设置规则与参数，生成可核对的历史回测。'],library:['研究与回测','在相同样本与成本下比较分钟策略，查看逐笔成交。'],strategy:['研究与回测','沿着价格、信号与交易记录理解策略。'],overview:['模拟执行','查看美股模拟账户的资金、持仓与净值。'],automation:['模拟执行','从回测报告启动策略，跟踪执行状态与订单。'],trade:['模拟执行','预览美股订单，检查风控后提交模拟委托。'],longbridge:['模拟执行','管理长桥港股模拟账户、委托与执行记录。'],risk:['管理与记录','管理交易限额、暂停开关与账户对账。'],audit:['管理与记录','追踪操作、状态变化与订单证据。'],acceptance:['管理与记录','核对验证记录，导出课程交付证据。']};
+    const contexts={'cn-trade':['模拟执行','管理 A 股仿真账户、限价委托与对账；组合自动调仓尚未接通。'],showcase:['工作空间','从历史验证到模拟执行，按你的任务开始。'],daily:['研究与回测','比较选股、买卖时机与仓位，理解收益和回撤的来源。'],portfolio:['研究与回测','选择组合、查看历史表现，再授权模拟账户执行。'],research:['研究与回测','设置规则与参数，生成可核对的历史回测。'],library:['研究与回测','在相同样本与成本下比较分钟策略，查看逐笔成交。'],strategy:['研究与回测','沿着价格、信号与交易记录理解策略。'],overview:['模拟执行','查看美股模拟账户的资金、持仓与净值。'],automation:['模拟执行','从回测报告启动策略，跟踪执行状态与订单。'],trade:['模拟执行','预览美股订单，检查风控后提交模拟委托。'],longbridge:['模拟执行','管理长桥港股模拟账户、委托与执行记录。'],risk:['管理与记录','管理交易限额、暂停开关与账户对账。'],audit:['管理与记录','追踪操作、状态变化与订单证据。'],acceptance:['管理与记录','核对验证记录，导出课程交付证据。']};
     text('view-section',(contexts[view]?.[0]||'工作空间')+' / QUANT SYSTEM');text('view-description',contexts[view]?.[1]||'');
     text('view-title',inCenter?'策略中心':names[view]);if(inCenter){text('view-description','先选择频率和策略，再查看报告或配置回测。');centerTabs(view);}if(location.hash!=='#'+view)history.replaceState(null,'','#'+view);
     if(view==='audit'&&state.session?.operator)loadAudit();
@@ -92,9 +95,66 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   async function loadSession(){
     try{state.session=await api('session');text('identity-label',state.session.operator?state.session.username+' · 操作员已登录':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
     catch(e){state.session=null;text('identity-label','身份服务暂不可用');message('global-error',e.message,true);$('operator-notice').hidden=false;}
-    if(!state.session?.operator){longbridgePanel.clear();hkTrading.clear();portfolioUI.clear();}else if(location.hash==='#longbridge'){longbridgePanel.status();hkTrading.status();}
+    if(!state.session?.operator){longbridgePanel.clear();hkTrading.clear();portfolioUI.clear();clearCn();}else if(location.hash==='#longbridge'){longbridgePanel.status();hkTrading.status();}else if(location.hash==='#cn-trade'){loadCn();}
     syncAccess();
   }
+  const pick=(value,...keys)=>{for(const key of keys){const candidate=value?.[key];if(candidate!==undefined&&candidate!==null&&candidate!=='')return candidate;}return null;};
+  const cnClientId=()=> 'cn_'+crypto.randomUUID().replaceAll('-','');
+  function renderCnOrders(orders){
+    if(!orders?.length){emptyTable('cn-orders-body',7,'暂无本平台 A 股模拟订单。');return;}
+    $('cn-orders-body').replaceChildren(...orders.map(order=>{
+      const request=order.request||{},tr=node('tr'),symbol=node('td','',request.symbol||order.broker?.symbol||'—');
+      symbol.append(node('small','',order.client_id));
+      const side=request.side||order.broker?.side||'',sideCell=node('td',side==='buy'?'positive':'',side==='buy'?'买入':'卖出');
+      sideCell.append(node('small','',request.order_type==='limit'?'限价单':request.order_type||'—'));
+      const status=node('td',order.status==='unknown'?'negative':'',statusNames[order.status]||order.status||'—');
+      if(order.error)status.append(node('small','',order.error));
+      const action=node('td');
+      if(!cnTerminal.includes(order.status)&&order.native_client_id){const button=node('button','',order.status==='pending_cancel'?'查询撤单结果':'申请撤单');button.setAttribute('data-operator','');button.addEventListener('click',()=>askAction('申请撤销 A 股模拟委托',(request.symbol||'该订单')+' · '+order.client_id+'。撤单与成交可能并发，以掘金最终回报为准。',()=>api('cn/orders/cancel',{client_id:order.client_id})));action.append(button);}else action.textContent='—';
+      tr.append(node('td','',date(order.created_at)),symbol,sideCell,node('td','',num(request.quantity,0)),status,node('td','',order.native_order_id||order.native_client_id||'—'),action);return tr;
+    }));syncAccess();
+  }
+  function clearCn(){
+    state.cn=null;state.cnPending=null;cnGeneration++;
+    for(const id of ['cn-status','cn-account-details','cn-positions-body','cn-orders-body','cn-audit-list','cn-confirm-details'])$(id).replaceChildren();
+    $('cn-confirm-dialog').close();text('cn-connection','未读取账户');text('cn-account','请先登录');
+  }
+  let cnGeneration=0;
+  function renderCn(data){
+    if(!state.session?.operator)return;
+
+    state.cn=data;const bridge=data.bridge||{},control=data.control||{},account=data.account||{},cash=account.cash||{};
+    text('cn-connection',bridge.connected?'掘金桥接已连接':'掘金桥接未连接');$('cn-connection').className='badge '+(bridge.connected?'good':'bad');
+    text('cn-account',account&&Object.keys(account).length?'仿真账户已读取':'账户暂不可用');$('cn-account').className='badge '+(account&&Object.keys(account).length?'good':'bad');
+    $('cn-status').replaceChildren(details([['桥接连接',bridge.connected?'已连接':'未连接'],['交易状态',control.halted?'已暂停':'允许新委托'],['暂停原因',control.reason||'—'],['状态更新时间',date(bridge.updated_at)],['未决订单',String(data.unresolved??0)]]));
+    $('cn-account-details').replaceChildren(details([['资金可用',cny(pick(cash,'available','available_cash','cash'))],['账户净值',cny(pick(cash,'nav','total_asset','equity'))],['可取资金',cny(pick(cash,'withdrawable','available_to_withdraw'))]]));
+    const positions=data.positions||[];
+    if(!positions.length)emptyTable('cn-positions-body',5,'当前没有 A 股持仓。');
+    else $('cn-positions-body').replaceChildren(...positions.map(position=>{const tr=node('tr');[position.symbol||'—',num(pick(position,'volume','quantity','qty'),0),num(pick(position,'available_now','available'),0),cny(pick(position,'vwap','cost','cost_price')),cny(pick(position,'market_value','market_val'))].forEach(value=>tr.append(node('td','',value)));return tr;}));
+    renderCnOrders(data.orders||[]);
+  }
+  async function loadCn(){
+    if(!state.session?.operator){message('cn-message','请先使用平台账号密码登录；访客不能读取或操作 A 股仿真账户。',true);return;}
+    try{message('cn-message','');const generation=cnGeneration,data=await api('cn/status');if(generation!==cnGeneration||!state.session?.operator)return;renderCn(data);await loadCnAudit();}
+    catch(error){text('cn-connection','桥接不可用');$('cn-connection').className='badge bad';message('cn-message',error.message,true);}
+  }
+  async function loadCnOrders(){if(!state.session?.operator)return;try{const generation=cnGeneration,data=await api('cn/orders');if(generation!==cnGeneration||!state.session?.operator)return;renderCnOrders(data.orders||[]);}catch(error){message('cn-message',error.message,true);}}
+  async function loadCnAudit(){
+    if(!state.session?.operator)return;
+    try{const generation=cnGeneration,data=await api('cn/audit'),events=data.events||[];if(generation!==cnGeneration||!state.session?.operator)return;$('cn-audit-list').replaceChildren(...events.map(event=>{const item=node('details','record');item.append(node('summary','',event.kind+' · '+date(event.timestamp)),node('small','',event.actor||'bridge'),node('pre','',JSON.stringify(event.details||{},null,2)));return item;}));if(!events.length)$('cn-audit-list').replaceChildren(node('p','caption','尚无桥接审计事件。'));}
+    catch(error){$('cn-audit-list').replaceChildren(node('p','notice error',error.message));}
+  }
+  async function previewCnOrder(){
+    const form=$('cn-order-form'),raw=Object.fromEntries(new FormData(form)),payload={client_id:cnClientId(),symbol:String(raw.symbol||'').trim().toUpperCase(),side:raw.side,type:'limit',quantity:Number(raw.quantity),limit_price:Number(raw.limit_price)};
+    const generation=cnGeneration,result=await api('cn/orders/preview',payload),preview=result.preview||{},order=preview.order||payload;if(generation!==cnGeneration||!state.session?.operator)return;
+    state.cnPending=payload;message('cn-confirm-error','');$('cn-confirm-text').value='';$('cn-confirm-details').replaceChildren(details([['环境','掘金 A 股仿真'],['证券 / 方向',order.symbol+' / '+(order.side==='buy'?'买入':'卖出')],['数量 / 类型',num(order.quantity,0)+' 股 / 限价单'],['限价 / 估算金额',cny(order.limit_price)+' / '+cny(preview.estimated_notional)],['预检',Array.isArray(preview.rules)?preview.rules.join('；'):'通过']]),node('p','notice','提交前会再次检查暂停状态、资金、可卖持仓和单笔金额。掘金接收不等于成交。'));
+    $('cn-confirm-dialog').showModal();$('cn-confirm-title').focus();
+  }
+  async function submitCnOrder(){
+    const confirm=$('cn-confirm-text').value.trim();if(!state.cnPending)return;if(confirm!=='提交A股模拟订单'){message('cn-confirm-error','请输入“提交A股模拟订单”确认。',true);return;}
+    await busy($('cn-confirm-submit'),async()=>{try{message('cn-confirm-error','');const result=await api('cn/orders',{...state.cnPending,confirm});$('cn-confirm-dialog').close();state.cnPending=null;message('cn-message','委托已提交：'+(statusNames[result.order?.status]||result.order?.status||'等待策略线程回报')+'。请勿换订单号重复提交。');toast('A 股模拟委托状态已更新。');await loadCn();}catch(error){message('cn-confirm-error',error.message,true);}});
+  }
+  async function reconcileCn(){await busy($('cn-reconcile'),async()=>{try{const result=await api('cn/reconcile',{});message('cn-message',result.ok?'对账通过。':'对账存在未决订单，保持暂停。',!result.ok);await loadCn();}catch(error){message('cn-message',error.message,true);}});}
   function chart(id,points,series,format=money,markers=[]){
     const box=$(id);box.replaceChildren();const valid=points.filter(p=>series.some(s=>Number.isFinite(p[s.key])));
     if(!valid.length){box.append(node('p','caption','当前区间暂无可绘制数据。'));return;}
@@ -334,6 +394,11 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   $('download-report').addEventListener('click',()=>{if(state.report)download('quant-backtest-'+(state.report.id||'baseline')+'.json',state.report);});$('generate-plan').addEventListener('click',generatePlan);
   $('plan-to-ticket').addEventListener('click',()=>busy($('plan-to-ticket'),async()=>{try{if(!state.plan?.order)throw new Error('没有可提交的计划');await preview({...state.plan.order,allow_queued:$('plan-allow-queued').checked},state.plan.id);}catch(e){toast(e.message);}}));
   $('order-type').addEventListener('change',updateOrderFields);$('order-form').addEventListener('submit',e=>{e.preventDefault();busy(e.submitter,async()=>{try{message('order-message','正在检查账户、行情与限额…');await preview(orderInput());message('order-message','请在弹窗中核对并确认。');}catch(err){message('order-message',err.message,true);}});});$('confirm-submit').addEventListener('click',confirmOrder);
+  $('cn-order-form').addEventListener('submit',e=>{e.preventDefault();busy(e.submitter,async()=>{try{message('cn-message','正在检查桥接、资金、持仓与整手规则…');await previewCnOrder();message('cn-message','请在弹窗中核对并确认。');}catch(error){message('cn-message',error.message,true);}});});
+  $('cn-confirm-form').addEventListener('submit',e=>{e.preventDefault();submitCnOrder();});
+  $('cn-refresh').addEventListener('click',loadCn);$('cn-orders-refresh').addEventListener('click',loadCnOrders);$('cn-audit-refresh').addEventListener('click',loadCnAudit);$('cn-reconcile').addEventListener('click',reconcileCn);
+  $('cn-halt').addEventListener('click',()=>askAction('暂停 A 股新增委托','立即暂停桥接新增委托；已被掘金接收的订单仍需在订单列表跟踪或单独申请撤单。',()=>api('cn/control',{halted:true})));
+  $('cn-resume').addEventListener('click',()=>askAction('对账后恢复 A 股模拟盘','桥接将先读取掘金账户与订单；存在未知或撤单待确认订单时会保持暂停。请输入“恢复A股模拟盘”继续。',()=>api('cn/control',{halted:false,confirm:$('action-text').value}),true));
   $('order-filter').addEventListener('change',renderOrders);$('download-orders').addEventListener('click',exportOrders);
   $('cancel-all').addEventListener('click',()=>askAction('撤销本平台未完成订单','只申请撤销本平台创建的未完成 Paper 订单。已成交部分不能撤回。',()=>api('orders/cancel-all',{})));
   $('halt').addEventListener('click',()=>askAction('暂停新增订单','立即保存服务器暂停状态，已被券商接收的订单不受此按钮撤销。',()=>api('control',{halted:true})));

@@ -39,3 +39,5 @@ input,select{background:#fffefb;border-color:#d7d9ca;border-radius:6px;min-heigh
 .strategy-center{background:#f4efcf;border-color:#e2d79e;margin-bottom:24px}.strategy-center .form-row{align-items:flex-start}.strategy-center label{flex:1}.strategy-center .center-choice{flex:3}.strategy-center .caption{margin:14px 0}.strategy-center .segmented{flex-wrap:wrap;border-top:1px solid #dfd7b2;padding-top:14px}.strategy-center .selected{background:#e7dda3;color:#343c27;border-color:#b5ae77;font-weight:600}
 body[data-current-view="research"] #research-form label:has(select[name="type"]),body[data-current-view="library"] #library-detail-select,body[data-current-view="portfolio"] label:has(#pf-strategy){display:none}
 @media(max-width:760px){.strategy-center .form-row{display:grid;grid-template-columns:1fr}.strategy-center .segmented button{flex:1}}
+
+[data-cn-only]{display:none!important}body[data-broker-view="cn"] [data-cn-only]{display:block!important}body[data-broker-view="cn"] [data-alpaca-only],body[data-broker-view="cn"] [data-hk-only]{display:none!important}

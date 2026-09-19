@@ -6,6 +6,7 @@ import {hkOverview} from './hk.mjs';
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,INTRADAY_SYMBOLS,strategyConfig,isIntraday,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
 import {PAGE,CSS,CLIENT,FROZEN,LIBRARY_DEMO,CURRENT_DAILY_PLAN,HISTORICAL_DAILY_RESULTS,MODULAR_DAILY_RESULTS,DAILY_REFINEMENT} from './assets.mjs';
 import {broker} from './transport.mjs';
+import {myquantBridge} from './myquant-transport.mjs';
 import {identity,login,logout} from './auth.mjs';
 import {createAutomation,autoGuard} from './automation.mjs';
 import {verifyScheduler} from './scheduler-auth.mjs';
@@ -31,6 +32,15 @@ async function operator(request,env,db){
   const user=await identity(request,env,db);requireValue(user.signed_in,'请先使用网站账号和密码登录',401,'SIGN_IN_REQUIRED');
   requireValue(user.operator,'当前账号只有查看权限',403,'FORBIDDEN');
   return user;
+}
+async function myquantAction(env,db,user,path,input,kind){
+  const result=await myquantBridge(env,path,{method:'POST',payload:input,actor:user.id});
+  await audit(db,user.id,'myquant_'+kind,input?.client_id||null,{
+    source:'myquant_sim_bridge',
+    order_status:result.order?.status||null,
+    bridge_connected:result.bridge?.connected??null,
+  });
+  return result;
 }
 async function body(request){
   const path=new URL(request.url).pathname;const limit=path==='/api/v1/portfolio/backtests'?2000000:path==='/api/v1/portfolio/signals'?500000:20000;
@@ -338,6 +348,9 @@ async function route(request,env){
     if(path==='/api/v1/hk/overview'){await operator(request,env,db);return json(await hkOverview(env,url.searchParams.get('symbol')||'HK.00700'));}
     if(path==='/api/v1/automation'){await operator(request,env,db);return json(await auto.status(db,env));}
     if(path==='/api/v1/session'){const u=await identity(request,env,db);return json({ok:true,signed_in:u.signed_in,operator:u.operator,username:u.username,expires_at:u.expires_at,auth_mode:'password',login_enabled:Boolean(env.AUTH_USERNAME&&env.AUTH_PASSWORD_RECORD)});}
+    if(path==='/api/v1/cn/status'){const user=await operator(request,env,db);return json(await myquantBridge(env,'/v1/status',{actor:user.id}));}
+    if(path==='/api/v1/cn/orders'){const user=await operator(request,env,db);return json(await myquantBridge(env,'/v1/orders',{actor:user.id}));}
+    if(path==='/api/v1/cn/audit'){const user=await operator(request,env,db);return json(await myquantBridge(env,'/v1/audit',{actor:user.id}));}
     if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
     if(path==='/api/v1/equity'){const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
     if(path==='/api/v1/market'){const sym=symbol(url.searchParams.get('symbol'));return json({ok:true,symbol:sym,source:'Alpaca IEX',fetched_at:nowISO(),snapshot:await snapshotQuote(env,sym)});}
@@ -356,6 +369,11 @@ async function route(request,env){
   if(path==='/api/v1/auth/login'){const result=await login(request,env,db,input,auditStatement);return json(result.body,200,result.headers);}
   if(path==='/api/v1/auth/logout'){const result=await logout(request,env,db,auditStatement);return json(result.body,200,result.headers);}
   const user=await operator(request,env,db);
+  if(path==='/api/v1/cn/orders/preview')return json(await myquantAction(env,db,user,'/v1/orders/preview',input,'order_preview'));
+  if(path==='/api/v1/cn/orders')return json(await myquantAction(env,db,user,'/v1/orders',input,'order_submit'));
+  if(path==='/api/v1/cn/orders/cancel')return json(await myquantAction(env,db,user,'/v1/orders/cancel',input,'order_cancel'));
+  if(path==='/api/v1/cn/reconcile')return json(await myquantAction(env,db,user,'/v1/reconcile',input,'reconcile'));
+  if(path==='/api/v1/cn/control')return json(await myquantAction(env,db,user,'/v1/control',input,'control'));
   if(path==='/api/v1/portfolio/backtests'){
    const e=portfolioCatalog.get(input.signal?.strategy_id),r=input.backtest,dates=input.dates;
    requireValue(e&&input.signal.strategy_version===e.version,'策略版本无效');
