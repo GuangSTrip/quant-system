@@ -1,3 +1,6 @@
+import {tradingState,setTrading,previewHK,submitHK,inspectHK,cancelHK,recoverHK,startHKAuto,pauseHKAuto,resumeHKAuto,tickHK,changeHKConnection} from './longbridge-trading.mjs';
+import {connectionStatus,saveConnection,removeConnection,connectionOverview} from './longbridge.mjs';
+import {hkOverview} from './hk.mjs';
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,INTRADAY_SYMBOLS,strategyConfig,isIntraday,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
 import {PAGE,CSS,CLIENT,FROZEN,LIBRARY_DEMO,CURRENT_DAILY_PLAN,HISTORICAL_DAILY_RESULTS,MODULAR_DAILY_RESULTS,DAILY_REFINEMENT} from './assets.mjs';
 import {broker} from './transport.mjs';
@@ -300,8 +303,12 @@ async function route(request,env){
   }
   requireValue(method==='GET'||method==='POST','Method not allowed',405);
   const db=database(env);
-  if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);await verifyScheduler(request,env);const result=await auto.tick(env,db,'github');console.info(JSON.stringify({event:'scheduler_tick',source:'github',at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
+  if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);await verifyScheduler(request,env);const result=await scheduledTick(env,db,'github');console.info(JSON.stringify({event:'scheduler_tick',source:'github',at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
   if(method==='GET'){
+    if(path==='/api/v1/longbridge/trading'){await operator(request,env,db);return json(await tradingState(env,db));}
+    if(path==='/api/v1/longbridge/status'){await operator(request,env,db);return json(await connectionStatus(env,db));}
+    if(path==='/api/v1/longbridge/overview'){await operator(request,env,db);return json(await connectionOverview(env,db));}
+    if(path==='/api/v1/hk/overview'){await operator(request,env,db);return json(await hkOverview(env,url.searchParams.get('symbol')||'HK.00700'));}
     if(path==='/api/v1/automation'){await operator(request,env,db);return json(await auto.status(db,env));}
     if(path==='/api/v1/session'){const u=await identity(request,env,db);return json({ok:true,signed_in:u.signed_in,operator:u.operator,username:u.username,expires_at:u.expires_at,auth_mode:'password',login_enabled:Boolean(env.AUTH_USERNAME&&env.AUTH_PASSWORD_RECORD)});}
     if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
@@ -322,6 +329,18 @@ async function route(request,env){
   if(path==='/api/v1/auth/login'){const result=await login(request,env,db,input,auditStatement);return json(result.body,200,result.headers);}
   if(path==='/api/v1/auth/logout'){const result=await logout(request,env,db,auditStatement);return json(result.body,200,result.headers);}
   const user=await operator(request,env,db);
+  if(path==='/api/v1/longbridge/connect')return json(await changeHKConnection(db,()=>saveConnection(env,db,user,input,auditStatement)));
+  if(path==='/api/v1/longbridge/disconnect'){requireValue(input.confirm===true,'请确认移除长桥连接');return json(await changeHKConnection(db,()=>removeConnection(db,user,auditStatement)));}
+  if(path==='/api/v1/longbridge/control')return json(await setTrading(env,db,user,input));
+  if(path==='/api/v1/longbridge/orders/preview')return json(await previewHK(env,db,input));
+  if(path==='/api/v1/longbridge/orders/submit')return json(await submitHK(env,db,user,input));
+  if(path==='/api/v1/longbridge/orders/inspect')return json(await inspectHK(env,db,input.client_id));
+  if(path==='/api/v1/longbridge/orders/cancel')return json(await cancelHK(env,db,user,input));
+  if(path==='/api/v1/longbridge/recover')return json(await recoverHK(env,db,user));
+  if(path==='/api/v1/longbridge/auto/start')return json(await startHKAuto(env,db,user,input));
+  if(path==='/api/v1/longbridge/auto/resume')return json(await resumeHKAuto(env,db,user,input));
+  if(path==='/api/v1/longbridge/auto/pause')return json(await pauseHKAuto(env,db,user));
+  if(path==='/api/v1/longbridge/auto/tick')return json(await tickHK(env,db,'manual'));
   if(path==='/api/v1/automation/start')return json(await auto.configure(env,db,user,input));
   if(path==='/api/v1/automation/resume')return json(await auto.resume(env,db,user,input));
   if(path==='/api/v1/automation/pause'){if(input.cancel)return json(await auto.cancelRun(env,db,user));await auto.pause(db,user);return json(await auto.status(db,env));}
@@ -370,4 +389,5 @@ async function route(request,env){
   throw new AppError('接口不存在',404,'NOT_FOUND');
 }
 const auto=createAutomation({accountContext,history,snapshotQuote,requireCourseAsset,submitOrder,reconcile,audit,auditStatement,artifact,control,cancelOrders,acquire,release,saveArtifact});
-export default {async scheduled(event,env){requireValue(env.SCHEDULER_NATIVE==='true','原生调度未启用',503);return auto.tick(env,database(env),'cloudflare');},async fetch(request,env){const requestId=crypto.randomUUID();try{const response=await route(request,env);response.headers.set('x-request-id',requestId);return response;}catch(error){const known=error instanceof AppError;const response=json({ok:false,error:known?error.message:'服务暂时不可用，新增交易已阻断；请稍后重试。',code:known?error.code:'SERVICE_UNAVAILABLE',request_id:requestId},known?error.status:503);response.headers.set('x-request-id',requestId);if(!known)console.error('request_failed',requestId,error?.name||'Error');return response;}}};
+async function scheduledTick(env,db,source){const results=await Promise.allSettled([auto.tick(env,db,source),tickHK(env,db,source)]);if(results[0].status==='rejected')throw results[0].reason;const result=results[0].value;result.longbridge=results[1].status==='fulfilled'?results[1].value:{ok:false,outcome:'fault',message:'长桥调度异常，请核对后恢复'};return result;}
+export default {async scheduled(event,env){requireValue(env.SCHEDULER_NATIVE==='true','原生调度未启用',503);const db=database(env);return scheduledTick(env,db,'cloudflare');},async fetch(request,env){const requestId=crypto.randomUUID();try{const response=await route(request,env);response.headers.set('x-request-id',requestId);return response;}catch(error){const known=error instanceof AppError;const response=json({ok:false,error:known?error.message:'服务暂时不可用，新增交易已阻断；请稍后重试。',code:known?error.code:'SERVICE_UNAVAILABLE',request_id:requestId},known?error.status:503);response.headers.set('x-request-id',requestId);if(!known)console.error('request_failed',requestId,error?.name||'Error');return response;}}};

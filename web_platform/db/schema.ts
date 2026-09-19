@@ -48,3 +48,24 @@ export const autoCycles=sqliteTable('auto_cycles',{
   id:integer('id').primaryKey({autoIncrement:true}),runId:text('run_id'),source:text('source').notNull(),outcome:text('outcome').notNull(),
   details:text('details').notNull(),createdAt:text('created_at').notNull()
 });
+
+export const longbridgeConnection=sqliteTable('longbridge_connection',{
+  id:integer('id').primaryKey(),ciphertext:text('ciphertext').notNull(),updatedAt:text('updated_at').notNull(),actor:text('actor').notNull()
+});
+
+export const lbControl=sqliteTable('lb_control',{
+ id:integer('id').primaryKey(),enabled:integer('enabled').notNull().default(0),connectionTag:text('connection_tag'),
+ maxOrder:real('max_order').notNull().default(2000),maxDaily:real('max_daily').notNull().default(5000),
+ leaseId:text('lease_id'),leaseUntil:integer('lease_until').notNull().default(0),updatedAt:text('updated_at').notNull()
+});
+export const lbOrders=sqliteTable('lb_orders',{
+ clientId:text('client_id').primaryKey(),connectionTag:text('connection_tag').notNull(),brokerId:text('broker_id'),
+ payload:text('payload').notNull(),requestHash:text('request_hash').notNull(),status:text('status').notNull(),
+ notional:real('notional').notNull(),initialQty:real('initial_qty').notNull(),brokerData:text('broker_data'),error:text('error'),
+ actor:text('actor').notNull(),runId:text('run_id'),createdAt:text('created_at').notNull(),updatedAt:text('updated_at').notNull()
+});
+export const lbAuto=sqliteTable('lb_auto',{
+ id:integer('id').primaryKey(),enabled:integer('enabled').notNull().default(0),runId:text('run_id'),config:text('config'),
+ nextAt:integer('next_at').notNull().default(0),sequence:integer('sequence').notNull().default(0),
+ heartbeatAt:text('heartbeat_at'),lastAt:text('last_at'),outcome:text('outcome'),reason:text('reason'),updatedAt:text('updated_at').notNull()
+});

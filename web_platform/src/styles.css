@@ -13,3 +13,5 @@ body[data-current-view="daily"] #operator-notice,body[data-current-view="daily"]
 @media(max-width:800px){.lab-result-grid{grid-template-columns:1fr}.lab-flow{grid-template-columns:1fr}.lab-controls .form-grid{grid-template-columns:1fr 1fr}.lab-controls .full{grid-column:1/-1}.lab-source-tools{grid-template-columns:1fr}.lab-day-head strong{order:-1;width:100%}.lab-intro .badge{white-space:normal}.lab-explain{min-height:0}}
 
 .dr-rules{margin:22px 0}.dr-rules>div{padding:16px;background:#0a1724;border-radius:8px;min-width:0}.dr-rules p{font-size:.87rem;line-height:1.8;color:var(--muted);margin-bottom:0}#dr-choice{width:100%;min-width:0}#daily-refinement .table-scroll{margin:16px 0}
+/* Broker context is independent of asynchronous Alpaca refreshes. */
+[data-hk-only]{display:none!important}body[data-broker-view="hk"] [data-hk-only]{display:block!important}body[data-broker-view="hk"] [data-alpaca-only]{display:none!important}
