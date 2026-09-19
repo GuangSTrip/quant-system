@@ -68,7 +68,7 @@ test('concurrent submits are serialized before the network side effect',async t=
  const second=await f.request('/api/v1/longbridge/orders/submit',f.order());assert.equal(second.data.code,'LB_BUSY');unblock();await first;assert.equal(f.lb.posts.length,1);
 });
 test('automation submits once, waits for fills and interval, stops at total budget and respects pause',async t=>{
- const f=await fixture(t);await f.enable();let time=Date.parse(new Date().toISOString().slice(0,10)+'T10:00:00+08:00');while(!hkWindow(time))time+=86400000;const old=Date.now;Date.now=()=>time;t.after(()=>Date.now=old);
+ const f=await fixture(t);await f.enable();let time=Date.parse(new Date().toISOString().slice(0,10)+'T10:00:00+08:00');while(!hkWindow(time))time+=86400000;const old=Date.now;Date.now=()=>time;t.after(()=>Date.now=old);f.db.sqlite.prepare('UPDATE auth_sessions SET expires_at=?').run(Date.now()+8*3600000);
  const start=await f.request('/api/v1/longbridge/auto/start',{...f.order(),budget:1000,interval_minutes:5,confirm:'启动长桥自动模拟交易'});assert.equal(start.status,200);
  let r=await f.request('/api/v1/longbridge/auto/tick',{});assert.equal(r.data.outcome,'submitted');r=await f.request('/api/v1/longbridge/auto/tick',{});assert.equal(r.data.outcome,'pending');assert.equal(f.lb.posts.length,1);
  Object.assign(f.lb.orders.get('101'),{status:'FilledStatus',executed_quantity:'100',executed_price:'10'});f.lb.quantity=100;time+=6*60000;
@@ -76,7 +76,7 @@ test('automation submits once, waits for fills and interval, stops at total budg
  await f.request('/api/v1/longbridge/auto/pause',{});assert.equal((await f.request('/api/v1/longbridge/auto/tick',{})).data.outcome,'paused');
 });
 test('automation faults safely on uncertain submit and credential replacement invalidates authorization',async t=>{
- const f=await fixture(t);await f.enable();let time=Date.parse('2026-09-18T10:00:00+08:00');const old=Date.now;Date.now=()=>time;t.after(()=>Date.now=old);
+ const f=await fixture(t);await f.enable();let time=Date.parse('2026-09-18T10:00:00+08:00');const old=Date.now;Date.now=()=>time;t.after(()=>Date.now=old);f.db.sqlite.prepare('UPDATE auth_sessions SET expires_at=?').run(Date.now()+8*3600000);
  await f.request('/api/v1/longbridge/auto/start',{...f.order(),budget:2000,interval_minutes:5,confirm:'启动长桥自动模拟交易'});f.lb.onPost=()=>{throw Error('timeout');};let r=await f.request('/api/v1/longbridge/auto/tick',{});assert.equal(r.data.outcome,'fault');assert.equal(f.db.get('SELECT enabled FROM lb_auto').enabled,0);
  const changed=await seal(f.env,{...creds,access_token:'new-fixture-token'});f.db.sqlite.prepare('UPDATE longbridge_connection SET ciphertext=?').run(changed);
  r=await f.request('/api/v1/longbridge/trading');assert.equal(r.data.control.enabled,false);assert.equal(r.data.orders.length,0);
@@ -96,7 +96,7 @@ test('cancelled orders retain daily budget and account-change guards until termi
  const f=await fixture(t);await f.request('/api/v1/longbridge/control',{enabled:true,confirm:'确认长桥模拟账户',max_order:1000,max_daily:1000});const p=f.order();await f.request('/api/v1/longbridge/orders/submit',p);await f.request('/api/v1/longbridge/orders/cancel',{client_id:p.client_id,confirm:true});await f.request('/api/v1/longbridge/orders/inspect',{client_id:p.client_id});assert.equal((await f.request('/api/v1/longbridge/orders/submit',f.order())).data.code,'LB_DAILY_LIMIT');
 });
 test('native background scheduler advances Longbridge without a browser and updates heartbeat',async t=>{
- const f=await fixture(t);f.env.SCHEDULER_NATIVE='true';await f.enable();const old=Date.now;Date.now=()=>Date.parse('2026-09-18T10:00:00+08:00');t.after(()=>Date.now=old);
+ const f=await fixture(t);f.env.SCHEDULER_NATIVE='true';await f.enable();const old=Date.now;Date.now=()=>Date.parse('2026-09-18T10:00:00+08:00');t.after(()=>Date.now=old);f.db.sqlite.prepare('UPDATE auth_sessions SET expires_at=?').run(Date.now()+8*3600000);
  await f.request('/api/v1/longbridge/auto/start',{...f.order(),budget:2000,interval_minutes:5,confirm:'启动长桥自动模拟交易'});
  const {default:worker}=await import('../worker/index.js');const r=await worker.scheduled({},f.env);assert.equal(r.longbridge.outcome,'submitted');assert.ok(f.db.get('SELECT heartbeat_at FROM lb_auto').heartbeat_at);assert.equal(f.lb.posts.length,1);
 });
@@ -105,7 +105,7 @@ test('unknown longbridge receipt cannot be accepted for another symbol or oversi
 });
 
 test('resume preserves the original run and spent budget with existing filled positions',async t=>{
- const f=await fixture(t);await f.enable();const old=Date.now;let time=Date.parse('2026-09-18T10:00:00+08:00');Date.now=()=>time;t.after(()=>Date.now=old);
+ const f=await fixture(t);await f.enable();const old=Date.now;let time=Date.parse('2026-09-18T10:00:00+08:00');Date.now=()=>time;t.after(()=>Date.now=old);f.db.sqlite.prepare('UPDATE auth_sessions SET expires_at=?').run(Date.now()+8*3600000);
  await f.request('/api/v1/longbridge/auto/start',{...f.order(),budget:2000,interval_minutes:5,confirm:'启动长桥自动模拟交易'});const runId=f.db.get('SELECT run_id FROM lb_auto').run_id;
  await f.request('/api/v1/longbridge/auto/tick',{});Object.assign(f.lb.orders.get('101'),{status:'FilledStatus',executed_quantity:'100',executed_price:'10'});f.lb.quantity=100;
  await f.request('/api/v1/longbridge/auto/pause',{});const r=await f.request('/api/v1/longbridge/auto/resume',{confirm:'启动长桥自动模拟交易'});assert.equal(r.status,200);assert.equal(r.data.automation.run_id,runId);assert.equal(r.data.automation.sequence,1);assert.equal(f.lb.posts.length,1);

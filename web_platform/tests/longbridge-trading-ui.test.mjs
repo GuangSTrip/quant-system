@@ -14,3 +14,10 @@ test('logout invalidates in-flight status and clears all transaction results',as
 test('failed trading state hides previous records instead of presenting stale permission',async t=>{
  let fail=false;const {ui,get}=fixture(t,async()=>{if(fail)throw Error('请重新登录');return data;});await ui.status();fail=true;await ui.status();assert.equal(get('lb-execution').hidden,true);assert.equal(get('lb-ledger').children.length,0);assert.equal(get('lb-trade-message').textContent,'请重新登录');
 });
+
+test('preview shows a pending message beside the order and a 409 clears any previously confirmed preview',async t=>{
+ const previous=globalThis.FormData;globalThis.FormData=class{*[Symbol.iterator](){yield ['symbol','2800.HK'];}};t.after(()=>globalThis.FormData=previous);
+ let reject,fail=false;const {get}=fixture(t,async()=>{if(fail)return new Promise((_,r)=>reject=r);return {order:{symbol:'2800.HK',side:'Buy',quantity:500,price:10},notional:5000,queued:false,message:'checked'};});
+ await get('lb-trade-form').events.submit({preventDefault(){}});assert.equal(get('lb-submit-order').disabled,false);assert.match(get('lb-order-feedback').textContent,/预览通过/);
+ fail=true;const request=get('lb-trade-form').events.submit({preventDefault(){}});assert.equal(get('lb-submit-order').disabled,true);assert.match(get('lb-order-feedback').textContent,/正在处理/);reject(Error('订单金额超过长桥单笔限额'));await request;assert.equal(get('lb-order-feedback').textContent,'订单金额超过长桥单笔限额');assert.equal(get('lb-submit-order').disabled,true);assert.match(get('lb-order-summary').textContent,/未通过/);
+});
