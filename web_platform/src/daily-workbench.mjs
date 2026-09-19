@@ -74,7 +74,7 @@ export function createDailyWorkbench(root,chart){
     const exposure=r.exposure.slice(range.start,range.end);const avg=exposure.reduce((a,b)=>a+b,0)/exposure.length;
     $('dq-exposure').textContent=pct(avg*100);
     const control=s.combinations.find(x=>x.selection===r.selection&&x.timing==='monthly'&&x.allocation==='equal');
-    const series=[{key:'strategy',name:'当前组合',color:'#63e0c7',result:r},{key:'control',name:'同选股 · 每月等权80%',color:'#78a8ff',result:control},{key:'benchmark',name:'流动性对照 · 80%股票',color:'#edbd68',result:s.benchmark}];
+    const series=[{key:'strategy',name:'当前组合',color:'#527347',result:r},{key:'control',name:'同选股 · 每月等权80%',color:'#627d9b',result:control},{key:'benchmark',name:'流动性对照 · 80%股票',color:'#a4832c',result:s.benchmark}];
     const mode=$('dq-mode').value,dates=s.dates.slice(range.anchor,range.end);
     const points=dates.map(t=>({t}));
     for(const entry of series){const v=entry.result.equity.slice(range.anchor,range.end);const vals=mode==='exposure'?entry.result.exposure.slice(range.anchor,range.end):mode==='drawdown'?drawdownSeries(v):v.map(x=>x/v[0]);vals.forEach((v,i)=>{points[i][entry.key]=v;});}
@@ -87,7 +87,7 @@ export function createDailyWorkbench(root,chart){
     const story=curveStory(dates,r.equity.slice(range.anchor,range.end)),b=s.benchmark[period],c=control[period];
     const lines=[`本段实际累计收益 ${pct(m.total_return_pct)}：若本段起点为 100 万${currency}，终点约 ${integer(1_000_000*(1+m.total_return_pct/100))}${currency}。年化 ${pct(m.cagr_pct)} 是按本段长度折算。`,
       story.depth<0?`最深回撤 ${pct(-story.depth*100)}，从 ${story.from} 的高点到 ${story.trough} 的低点；${story.recovery?'于 '+story.recovery+' 回到该高点。':'到本段结束尚未回到该高点。'}`:'本段净值没有从此前高点下跌；若曲线水平，说明主要保持现金或未触发交易。',
-      r.id===control.id?'当前组合与蓝色“同选股对照”完全相同，两条线重合，青色显示在上层。':`相同选股改用“每月换股、等权80%”后，本段累计收益 ${pct(c.total_return_pct)}、回撤 ${pct(-c.max_drawdown_pct)}；当前买卖与仓位组合改变累计收益 ${(m.total_return_pct-c.total_return_pct).toFixed(2)} 个百分点。`,
+      r.id===control.id?'当前组合与蓝色“同选股对照”完全相同，两条线重合，绿色显示在上层。':`相同选股改用“每月换股、等权80%”后，本段累计收益 ${pct(c.total_return_pct)}、回撤 ${pct(-c.max_drawdown_pct)}；当前买卖与仓位组合改变累计收益 ${(m.total_return_pct-c.total_return_pct).toFixed(2)} 个百分点。`,
       `流动性对照每月选择最多 100 只流动性股票，等权投入 80%、费用相同。本段累计收益 ${pct(b.total_return_pct)}，当前组合相差 ${(m.total_return_pct-b.total_return_pct).toFixed(2)} 个百分点；平均股票仓位 ${pct(avg*100)}，其余现金不计利息。`];
     $('dq-analysis').replaceChildren(...lines.map(t=>el('p','',t)));
     $('dq-coverage').textContent=`${s.metadata.from} 至 ${s.metadata.to}，${s.metadata.sessions} 个交易日，${s.metadata.symbols} 个代码。${s.metadata.scope}。2024 年主要用于指标预热；此页只展示已完成的历史计算。`;

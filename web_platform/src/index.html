@@ -1,33 +1,29 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 模拟交易工作台</title><link rel="stylesheet" href="/styles.css?v=platform-8"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 模拟交易工作台</title><link rel="stylesheet" href="/styles.css?v=lemon-1"></head>
 <body>
 <div class="app-shell">
-  <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>课程交易平台</small></span></a>
-    <nav aria-label="主导航">
-      <button data-view="portfolio" class="nav">组 <span>组合策略</span></button>
-      <button data-view="longbridge" class="nav">港 <span>港股 · 长桥</span></button>
-      <button data-view="showcase" class="nav active">00 <span>成果演示</span></button>
-      <button data-view="daily" class="nav">日 <span>日线策略研究</span></button>
-      <button data-view="library" class="nav">旧 <span>分钟旧研究</span></button>
-      <button data-view="overview" class="nav">01 <span>账户总览</span></button>
-      <button data-view="strategy" class="nav">学 <span>策略讲解</span></button>
-      <button data-view="research" class="nav">02 <span>策略与回测</span></button>
-      <button data-view="trade" class="nav">03 <span>模拟交易</span></button>
-      <button data-view="risk" class="nav">04 <span>风控与对账</span></button>
-      <button data-view="audit" class="nav">05 <span>操作审计</span></button>
-      <button data-view="automation" class="nav">07 <span>自动策略</span></button>
-      <button data-view="acceptance" class="nav">06 <span>交付验收</span></button>
-    </nav>
+  <aside class="sidebar"><a class="brand" href="#showcase"><b>Q</b><span>QUANT SYSTEM<small>量化研究工作台</small></span></a>
+    <nav aria-label="主导航"><div class="nav-group"><p class="nav-heading">工作空间</p><button data-view="showcase" class="nav"><span class="nav-index" aria-hidden="true">01</span><span>研究概览</span></button></div><div class="nav-group"><p class="nav-heading">研究与回测</p><button data-view="strategies" class="nav"><span class="nav-index" aria-hidden="true">02</span><span>策略中心</span></button></div><div class="nav-group"><p class="nav-heading">模拟执行</p><button data-view="overview" class="nav"><span class="nav-index" aria-hidden="true">07</span><span>账户总览</span></button><button data-view="automation" class="nav"><span class="nav-index" aria-hidden="true">08</span><span>运行管理</span></button><button data-view="trade" class="nav"><span class="nav-index" aria-hidden="true">09</span><span>美股交易</span></button><button data-view="longbridge" class="nav"><span class="nav-index" aria-hidden="true">10</span><span>港股交易</span></button></div><div class="nav-group"><p class="nav-heading">管理与记录</p><button data-view="risk" class="nav"><span class="nav-index" aria-hidden="true">11</span><span>风控与对账</span></button><button data-view="audit" class="nav"><span class="nav-index" aria-hidden="true">12</span><span>操作审计</span></button><button data-view="acceptance" class="nav"><span class="nav-index" aria-hidden="true">13</span><span>交付验收</span></button></div></nav>
     <div class="sidebar-note"><div data-alpaca-only><strong id="broker-label">ALPACA PAPER</strong><p>美股与 ETF · USD<br>仅模拟资金</p></div><div data-hk-only><strong>港股账户</strong><p>长桥模拟交易 · HKD</p></div><span id="identity-label">正在确认身份</span><button id="sign-in" class="button subtle">账号密码登录</button><button id="sign-out" class="button subtle" hidden>退出登录</button></div>
   </aside>
   <main>
-    <header class="topbar"><div><p class="eyebrow">RESEARCH → EXECUTION</p><h1 id="view-title">成果演示</h1></div><div class="actions"><span data-hk-only class="badge">港股 · 独立交易通道</span><span data-alpaca-only id="connection" class="badge">正在连接</span><button id="open-help" aria-haspopup="dialog" aria-controls="help-dialog">使用说明</button><button data-alpaca-only id="refresh" title="重新读取账户与订单">↻ 刷新</button></div></header>
+    <header class="topbar"><div><p class="eyebrow" id="view-section">工作空间 / RESEARCH DESK</p><h1 id="view-title">研究概览</h1><p id="view-description" class="view-description">从历史验证到模拟执行，按你的任务开始。</p></div><div class="actions"><span data-hk-only class="badge">港股 · 独立交易通道</span><span data-alpaca-only id="connection" class="badge">正在连接</span><button id="open-help" aria-haspopup="dialog" aria-controls="help-dialog">使用说明</button><button data-alpaca-only id="refresh" title="重新读取账户与订单">↻ 刷新</button></div></header>
     <div data-alpaca-only class="status-line"><span id="freshness" role="status" aria-live="polite">连接服务器…</span><span id="control-state" class="badge">检查交易状态</span></div>
     <div data-alpaca-only id="global-error" class="notice error" role="alert" hidden></div>
     <div data-alpaca-only id="operator-notice" class="notice" hidden>当前可查看实时账户。使用网站的课程账号和密码登录后，可回测、提交模拟订单及修改风控。</div>
 
+    <section id="strategy-center" class="panel strategy-center" hidden aria-label="策略选择">
+      <div class="form-row"><label>① 选择频率<select id="center-frequency"><option value="minute">高频 · 分钟级日内</option><option value="daily">低频 · 日线</option></select></label><label class="center-choice">② 选择具体策略<select id="center-strategy"></select></label></div>
+      <p id="center-capability" class="caption" role="status"></p><div id="center-tabs" class="segmented" aria-label="策略功能"></div>
+    </section>
     <section id="view-showcase" class="view">
-      <article class="panel"><p class="eyebrow">STRATEGY → DATA → BACKTEST → SIMULATION</p><h2>一页看清策略如何工作</h2><p class="caption">下方来自已保存的回测和运行记录。历史行情、回测成交与券商订单是三种不同证据；本地演示若使用券商替身，会在页面顶部明确标出。</p><div class="actions"><button data-go="research">查看完整回测与逐笔记录</button><button data-go="automation">查看模拟决策与订单</button><button id="showcase-refresh">刷新成果</button></div></article>
+      <article class="workspace-intro"><div><p class="eyebrow">QUANT SYSTEM / RESEARCH DESK</p><h2>让每一个交易决定，<br>都有研究可循。</h2><p>先检验历史表现，再选择策略进入模拟执行。</p></div><div class="workspace-mark" aria-hidden="true"><span>研究</span><i></i><span>验证</span><i></i><span>执行</span></div></article>
+      <div class="entry-grid">
+        <button class="entry-card" data-go="daily"><span class="entry-kicker">01 / EXPLORE</span><strong>探索日线策略 <span aria-hidden="true">↗</span></strong><span>比较选股、买卖时机与仓位，查看三市场历史表现。</span><em>A 股 · 港股 · 美股</em></button>
+        <button class="entry-card" data-go="research"><span class="entry-kicker">02 / BACKTEST</span><strong>创建一份回测 <span aria-hidden="true">↗</span></strong><span>选择标的与规则，检查曲线、回撤和逐笔成交。</span><em>日线 · 分钟线</em></button>
+        <button class="entry-card" data-go="portfolio"><span class="entry-kicker">03 / EXECUTE</span><strong>管理策略组合 <span aria-hidden="true">↗</span></strong><span>查看组合回测，发布信号并授权模拟账户自动调仓。</span><em>回测报告 · 模拟执行</em></button>
+      </div>
+      <div class="section-heading"><div><p class="eyebrow">SAVED RESEARCH</p><h2>已有研究与运行记录</h2></div><button id="showcase-refresh">刷新记录</button></div>
       <div class="showcase-grid"><article class="panel"><p class="eyebrow">01 / DATA</p><h2>数据从哪里来</h2><div id="showcase-data" class="showcase-content">正在读取历史快照…</div></article><article class="panel"><p class="eyebrow">02 / RULE</p><h2>选了什么、何时买卖</h2><div id="showcase-rule" class="showcase-content">正在读取策略报告…</div></article><article class="panel"><p class="eyebrow">03 / BACKTEST</p><h2>历史表现与限制</h2><div id="showcase-backtest" class="showcase-content">正在读取回测结果…</div></article></div>
       <article class="panel"><p class="eyebrow">04 / SIMULATION</p><h2>模拟订单结果</h2><div id="showcase-orders" class="showcase-content">登录后读取运行记录…</div><p class="caption">“回测成交”由历史价格计算；“模拟订单”有独立订单号和状态。只有真实 Alpaca Paper 回报才能证明 Paper 委托或成交。</p></article>
     </section>
@@ -37,7 +33,7 @@
       <article class="panel"><p class="eyebrow">01 / COMPARE</p><h2>同一标的的三策略对照</h2><p class="caption">三份报告使用同一数据样本、预算和市场规则。点击行内按钮可查看详细曲线。合成样本的排名没有投资意义。</p><div class="table-scroll"><table><thead><tr><th>策略</th><th>账面变化</th><th>同条件基准</th><th>成本</th><th>买卖笔数</th><th>最大盘中回撤</th><th>详情</th></tr></thead><tbody id="library-compare"></tbody></table></div></article>
       <article id="library-detail-select" class="panel"><p class="eyebrow">SELECT STRATEGY</p><h2>查看单项策略</h2><p class="caption">选择策略后，下方的规则、回测结果、曲线和逐笔交易同步更新。</p><div class="form-row"><label>策略<select id="library-strategy"><option value="opening_range">① 开盘区间突破</option><option value="vwap_reversion">② VWAP 均值回归</option><option value="adaptive_momentum">③ 波动率自适应动量</option></select></label></div></article>
       <div class="showcase-grid"><article class="panel"><p class="eyebrow">02 / INPUT</p><h2>标的与数据</h2><div id="library-data" class="showcase-content">正在读取报告…</div></article><article class="panel"><p class="eyebrow">03 / RULE</p><h2>买卖与市场约束</h2><div id="library-rule" class="showcase-content">正在读取报告…</div></article><article class="panel"><p class="eyebrow">04 / RESULT</p><h2>回测与基准</h2><div id="library-result" class="showcase-content">正在读取报告…</div></article></div>
-      <article class="panel"><p class="eyebrow">05 / CHARTS</p><h2>资金、回撤与买卖点</h2><div class="two-column"><div><h3>策略与同预算基准</h3><div id="library-equity" class="chart"></div><p class="caption">青色为策略，蓝色为同市场交易限制、同预算和同成本的基准。曲线从分钟回测中每 5 根采样，并保留交易与收盘点。</p></div><div><h3>从历史高点回落</h3><div id="library-drawdown" class="chart"></div><p id="library-chart-caption" class="caption"></p></div></div><h3>价格与回测买卖点</h3><div id="library-price" class="chart"></div><p class="caption">青点为按下一根分钟线开盘价模拟买入，红点为模拟卖出。圆点表示回测成交，不是券商回报。</p></article>
+      <article class="panel"><p class="eyebrow">05 / CHARTS</p><h2>资金、回撤与买卖点</h2><div class="two-column"><div><h3>策略与同预算基准</h3><div id="library-equity" class="chart"></div><p class="caption">绿色为策略，蓝色为同市场交易限制、同预算和同成本的基准。曲线从分钟回测中每 5 根采样，并保留交易与收盘点。</p></div><div><h3>从历史高点回落</h3><div id="library-drawdown" class="chart"></div><p id="library-chart-caption" class="caption"></p></div></div><h3>价格与回测买卖点</h3><div id="library-price" class="chart"></div><p class="caption">绿点为按下一根分钟线开盘价模拟买入，红点为模拟卖出。圆点表示回测成交，不是券商回报。</p></article>
       <article class="panel"><p class="eyebrow">06 / ORDERS</p><h2>逐笔回测成交</h2><p id="library-orders-caption" class="caption">以下是历史价格或合成价格驱动的回测记录，没有券商订单号或真实成交回报。</p><div class="table-scroll"><table><thead><tr><th>时间</th><th>方向</th><th>数量</th><th>价格</th><th>费用</th><th>触发原因</th></tr></thead><tbody id="library-orders"></tbody></table></div></article>
       <article class="panel"><p class="eyebrow">DAILY RESEARCH</p><h2>日线策略单独研究</h2><p class="caption">分钟数据不足时，日线策略使用多年真实历史数据单独验证。结果不用于证明分钟策略有效。</p><button data-go="daily">查看日线策略</button></article>
     </section>
@@ -105,14 +101,14 @@
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">② 解释每一天的判断</p><h2 id="lab-rule-title">双均线趋势</h2></div><span id="lab-signal" class="badge"></span></div>
         <p id="lab-rule" class="lab-rule"></p><p id="lab-data-label" class="caption"></p>
         <div id="lab-price" class="lab-price"></div>
-        <div class="lab-legend"><span>白色：收盘价</span><span class="positive" id="lab-legend-fast">青色：快均线</span><span class="lab-amber" id="lab-legend-slow">金色：慢均线</span><span>▲ 买入　▼ 卖出（回测成交日）</span></div>
+        <div class="lab-legend"><span>墨色：收盘价</span><span class="positive" id="lab-legend-fast">绿色：快均线</span><span class="lab-amber" id="lab-legend-slow">金色：慢均线</span><span>▲ 买入　▼ 卖出（回测成交日）</span></div>
         <label class="lab-slider">选择观察日期（可用方向键）<input id="lab-day" type="range" min="0" max="1" value="0"></label>
         <div class="lab-day-head"><button id="lab-prev" aria-label="前一个交易日">← 前一天</button><strong id="lab-day-label"></strong><button id="lab-next" aria-label="后一个交易日">后一天 →</button></div>
         <div id="lab-explain" class="lab-explain" aria-live="polite"></div>
-        <p class="caption">底部青色带表示持有信号，灰色带表示空仓信号。信号依据当日完整收盘数据，回测在下一交易日开盘执行；它不是当天已成交的指令。</p></article>
+        <p class="caption">底部绿色带表示持有信号，灰色带表示空仓信号。信号依据当日完整收盘数据，回测在下一交易日开盘执行；它不是当天已成交的指令。</p></article>
       </div>
       <article class="panel"><div class="panel-head"><div><p class="eyebrow">③ 检验效果</p><h2>这套规则，在这段数据里表现如何？</h2></div><span id="lab-result-state" class="badge"></span></div><div id="lab-metrics" class="mini-metrics"></div>
-        <div class="lab-result-grid"><div><h3>资金变化</h3><div id="lab-equity" class="chart"></div><p class="caption">青色：策略（含设定成本）；蓝色：同仓位买入持有（不计成本）。</p></div><div><h3>从历史高点回落多少</h3><div id="lab-drawdown" class="chart"></div><p class="caption">回撤越深，过程中承受的资金下跌越大。</p></div></div>
+        <div class="lab-result-grid"><div><h3>资金变化</h3><div id="lab-equity" class="chart"></div><p class="caption">绿色：策略（含设定成本）；蓝色：同仓位买入持有（不计成本）。</p></div><div><h3>从历史高点回落多少</h3><div id="lab-drawdown" class="chart"></div><p class="caption">回撤越深，过程中承受的资金下跌越大。</p></div></div>
         <p id="lab-reading" class="lab-rule"></p><p class="caption">参数调整属于历史探索，不是样本外验证。回测不模拟股息、税费、市场冲击与部分成交；历史收益不能证明未来盈利。</p>
         <div class="actions"><button id="lab-save" data-operator>保存当前真实快照上的参数</button><button id="lab-auto" class="primary" data-operator>带入自动策略配置 →</button></div><p id="lab-handoff" class="caption">教学数据不能用于启动模拟交易。先获取真实行情，或载入一份真实回测。</p>
       </article>
@@ -167,4 +163,4 @@
 <dialog id="confirm-dialog" aria-labelledby="confirm-title"><div class="dialog-content"><div class="panel-head"><h2 id="confirm-title" tabindex="-1">确认模拟订单</h2><button data-close="confirm-dialog" aria-label="关闭">×</button></div><div id="confirm-details"></div><div id="confirm-error" class="notice error" role="alert" hidden></div><div class="actions"><button data-close="confirm-dialog">返回修改</button><button id="confirm-submit" class="primary">确认提交到 Alpaca Paper</button></div></div></dialog>
 <dialog id="action-dialog" aria-labelledby="action-title"><form id="action-form" class="dialog-content"><h2 id="action-title">确认操作</h2><p id="action-description"></p><label id="action-text-label" hidden>确认文本<input id="action-text" autocomplete="off" placeholder="恢复模拟盘"></label><p id="action-error" class="notice error" role="alert" hidden></p><div class="actions"><button type="button" data-close="action-dialog">取消</button><button class="primary" id="action-submit">确认</button></div></form></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="/app.js?v=platform-7" defer></script></body></html>
+<script src="/app.js?v=lemon-1" defer></script></body></html>

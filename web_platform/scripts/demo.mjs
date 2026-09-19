@@ -54,7 +54,7 @@ http.createServer(async(req,res)=>{
     const request=new Request(`http://127.0.0.1:${port}${req.url}`,{method:req.method,headers:req.headers,...(body.length?{body:Buffer.concat(body)}:{})});
     const response=await worker.fetch(request,h.env);
     let bytes=Buffer.from(await response.arrayBuffer());
-    if(req.url==='/'&&response.headers.get('content-type')?.includes('text/html'))bytes=Buffer.from(bytes.toString().replace('<body>','<body><div style="position:sticky;top:0;z-index:1000;background:#7a4d09;color:white;padding:10px;text-align:center;font-weight:bold">本地研究页：日线栏目使用真实历史样本；交易相关功能由本地替身回放，并非 Alpaca Paper 实际成交</div>'));
+    if(req.url==='/'&&response.headers.get('content-type')?.includes('text/html'))bytes=Buffer.from(bytes.toString().replace('<body>','<body><div class="local-demo-banner">本地研究页：日线栏目使用真实历史样本；交易相关功能由本地替身回放，并非 Alpaca Paper 实际成交</div>'));
     res.writeHead(response.status,Object.fromEntries(response.headers));res.end(bytes);
   }catch(error){res.writeHead(500);res.end(error.message);}
 }).listen(port,'127.0.0.1',()=>console.log(`Local demo: http://127.0.0.1:${port}/#showcase · ${allBars.length} historical bars · two replay fills`));

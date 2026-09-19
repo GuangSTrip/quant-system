@@ -16,7 +16,7 @@ export function createRefinement(root,chart){
     <div class="table-scroll"><table><thead><tr><th>方案 / 区间</th><th>年化收益</th><th>最大回撤</th><th>累计收益</th></tr></thead><tbody id="dr-metrics"></tbody></table></div>
     <p id="dr-reading" class="notice"></p>
     <div class="panel-head"><div><h3>与上次报告方案对比</h3><p id="dr-period" class="caption"></p></div><label>曲线类型<select id="dr-mode"><option value="equity">资金曲线</option><option value="drawdown">回撤曲线</option></select></label></div>
-    <div class="dq-legend"><span><i class="dq-swatch" style="background:#63e0c7"></i> 青色：当前展示方案</span><span><i class="dq-swatch" style="background:#edbd68"></i> 金色：上次报告方案</span></div><div id="dr-chart" class="chart dq-chart"></div>
+    <div class="dq-legend"><span><i class="dq-swatch" style="background:#527347"></i> 绿色：当前展示方案</span><span><i class="dq-swatch" style="background:#a4832c"></i> 金色：上次报告方案</span></div><div id="dr-chart" class="chart dq-chart"></div>
     <p id="dr-chart-note" class="caption"></p>
     <details class="dq-details"><summary>展开：成本、成交延迟与研究说明</summary><p id="dr-stress"></p><p id="dr-method" class="caption"></p><p class="caption">每个市场独立从 100 万本币起步，2024 年用于指标预热。含基础交易成本；港美股是已取得数据的股票样本。本轮使用已经看过的历史做比较，未获得新的独立验证，曲线改善不等于未来承诺。</p></details>
     </article>`;
@@ -34,8 +34,8 @@ export function createRefinement(root,chart){
     $('dr-reading').textContent=`相比上次，全段年化收益${change>=0?'增加':'减少'} ${Math.abs(change).toFixed(2)} 个百分点，最大回撤${dd>=0?'增加':'减少'} ${Math.abs(dd).toFixed(2)} 个百分点。当前方案平均股票仓位 ${pct(r.average_exposure_pct)}。2026 年单段年化 ${pct(r.review.cagr_pct)}，请同时看逐年表现。`;
     $('dr-period').textContent=`${s.dates[0]} 至 ${s.dates.at(-1)}；上次方案：${label(s.previous)}。`;
     const mode=$('dr-mode').value;
-    chart('dr-chart',refinementPoints(s.dates,r.equity,s.previous.equity,mode),[{key:'previous',name:'上次报告方案',color:'#edbd68'},{key:'current',name:'当前展示方案',color:'#63e0c7'}],mode==='drawdown'?pct:v=>v.toFixed(2));
-    $('dr-chart-note').textContent=mode==='drawdown'?'越接近 0% 越稳，负数表示距此前最高资金水平的跌幅。收紧仓位通常会让下跌变浅，也会削弱上涨。':'两条线都从 1.00 开始，1.10 表示累计赚 10%，不是年化收益。青色更高表示累计收益更多；是否更稳请切换回撤曲线。';
+    chart('dr-chart',refinementPoints(s.dates,r.equity,s.previous.equity,mode),[{key:'previous',name:'上次报告方案',color:'#a4832c'},{key:'current',name:'当前展示方案',color:'#527347'}],mode==='drawdown'?pct:v=>v.toFixed(2));
+    $('dr-chart-note').textContent=mode==='drawdown'?'越接近 0% 越稳，负数表示距此前最高资金水平的跌幅。收紧仓位通常会让下跌变浅，也会削弱上涨。':'两条线都从 1.00 开始，1.10 表示累计赚 10%，不是年化收益。绿色更高表示累计收益更多；是否更稳请切换回撤曲线。';
     $('dr-stress').textContent=`以下压力检查只对应“本轮候选”：${s.selected.label}。交易成本加倍：全段年化 ${pct(s.double_cost.full.cagr_pct)} / 回撤 ${pct(-s.double_cost.full.max_drawdown_pct)}；成交再延迟一天：年化 ${pct(s.delayed_open.full.cagr_pct)} / 回撤 ${pct(-s.delayed_open.full.max_drawdown_pct)}。`;
     $('dr-method').textContent=s.definitions.details+' 选择口径：A 股在全段回撤 ≤10%、2026 年收益非负中选全段年化较高者；港股在全段回撤 ≤5%、全段及 2026 年年化 ≥8% 中选全段收益较高者；美股在全段年化 ≥8%、2026 年收益非负中选回撤较低者。均为事后探索选择。';
   }

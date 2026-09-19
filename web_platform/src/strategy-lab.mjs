@@ -31,7 +31,7 @@ export function createStrategyLab({api,chart,onSaved,onAuto}){
     try{config=readConfig();if(snapshot&&sourceSymbol!==config.symbol)throw Error('当前快照属于 '+sourceSymbol+'，请获取 '+config.symbol+' 的真实行情后继续。');report=backtest(bars,config);set('lab-rule-title',TITLES[config.type]);set('lab-rule',rule(config));
       set('lab-source-badge',snapshot?'真实历史快照 · 参数可预览':'教学示例 · 非市场数据');
       set('lab-data-label',`${sourceName}${snapshot?' · '+sourceSymbol:''} · ${bars.length} 根日线 · ${bars[0].t.slice(0,10)} — ${bars.at(-1).t.slice(0,10)}。${snapshot?'调整历史天数不会改变已载入快照，需重新获取行情。':'此价格序列为固定教学数据，不代表 SPY 或任何证券的历史表现。'}`);
-      set('lab-legend-fast',config.type==='momentum'?'青色：窗口起点收盘价':'青色：'+config.fast+' 日均线');
+      set('lab-legend-fast',config.type==='momentum'?'绿色：窗口起点收盘价':'绿色：'+config.fast+' 日均线');
       $('lab-legend-fast').hidden=config.type==='buy_hold';$('lab-legend-slow').hidden=config.type!=='sma';set('lab-legend-slow','金色：'+config.slow+' 日均线');
       const slider=$('lab-day');slider.max=bars.length-1;if(!slider.dataset.ready){slider.value=bars.length-1;slider.dataset.ready='1';}slider.value=Math.min(Number(slider.value),bars.length-1);
       drawPrice();drawDay();renderResults();message(snapshot&&sourceSymbol!==config.symbol?'当前快照属于 '+sourceSymbol+'，尚未切换为 '+config.symbol+'；请获取新标的真实行情。':(config.type!=='sma'?'当前模板不使用快周期。快周期仍需小于慢周期以符合统一参数校验。':''));
@@ -44,14 +44,14 @@ export function createStrategyLab({api,chart,onSaved,onAuto}){
     const svg=make('svg',{viewBox:`0 0 ${W} ${H}`,role:'img','aria-label':'收盘价、策略指标、回测成交与持仓信号。使用下方日期滑块查看具体数值。'});
     const values=bars.flatMap(b=>[b.o,b.c]),low=Math.min(...values)*.96,high=Math.max(...values)*1.04;
     const x=i=>L+i/(bars.length-1)*(W-L-R),y=v=>T+(high-v)/(high-low)*(H-T-B);
-    for(let i=0;i<4;i++){const v=low+(high-low)*i/3;svg.append(make('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'#24384a'}),make('text',{x:L-8,y:y(v)+5,fill:'#9bb0c5','text-anchor':'end','font-size':14},v.toFixed(0)));}
+    for(let i=0;i<4;i++){const v=low+(high-low)*i/3;svg.append(make('line',{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:'#e4e5db'}),make('text',{x:L-8,y:y(v)+5,fill:'#6e7266','text-anchor':'end','font-size':14},v.toFixed(0)));}
     const observations=bars.map((b,i)=>inspectSignal(bars,config,i));
     const line=(values,color)=>{let active=false;const path=values.map((v,i)=>{if(v===null){active=false;return '';}const p=(active?'L':'M')+x(i).toFixed(2)+','+y(v).toFixed(2);active=true;return p;}).join(' ');svg.append(make('path',{d:path,fill:'none',stroke:color,'stroke-width':2.2}));};
-    line(bars.map(b=>b.c),'#e1ecf8');if(config.type==='sma'){line(observations.map(o=>o.fast),'#63e0c7');line(observations.map(o=>o.slow),'#efc37b');}if(config.type==='momentum')line(observations.map(o=>o.reference),'#63e0c7');
-    observations.forEach((o,i)=>svg.append(make('rect',{x:x(i),y:H-39,width:(W-L-R)/(bars.length-1)+.2,height:9,fill:!o.ready?'#101c2b':o.signal?'#3a9b87':'#435469'})));
-    const indices=new Map(bars.map((b,i)=>[b.t,i]));for(const trade of report.trades){const i=indices.get(trade.t),xx=x(i),yy=y(trade.price),buy=trade.side==='buy';svg.append(make('path',{d:buy?`M ${xx} ${yy-7} l -5 10 h 10 Z`:`M ${xx} ${yy+7} l -5 -10 h 10 Z`,fill:buy?'#63e0c7':'#ff8694',stroke:'#080f18','stroke-width':1}));}
-    for(const i of [0,Math.floor(bars.length/2),bars.length-1])svg.append(make('text',{x:x(i),y:H-8,fill:'#9bb0c5','font-size':14,'text-anchor':i===0?'start':i===bars.length-1?'end':'middle'},bars[i].t.slice(0,10)));
-    svg.append(make('line',{id:'lab-cursor',x1:x(Number($('lab-day').value)),x2:x(Number($('lab-day').value)),y1:T,y2:H-27,stroke:'#fff','stroke-dasharray':'4 4'}));
+    line(bars.map(b=>b.c),'#292d25');if(config.type==='sma'){line(observations.map(o=>o.fast),'#527347');line(observations.map(o=>o.slow),'#99771d');}if(config.type==='momentum')line(observations.map(o=>o.reference),'#527347');
+    observations.forEach((o,i)=>svg.append(make('rect',{x:x(i),y:H-39,width:(W-L-R)/(bars.length-1)+.2,height:9,fill:!o.ready?'#ffffff':o.signal?'#527347':'#d5d9cc'})));
+    const indices=new Map(bars.map((b,i)=>[b.t,i]));for(const trade of report.trades){const i=indices.get(trade.t),xx=x(i),yy=y(trade.price),buy=trade.side==='buy';svg.append(make('path',{d:buy?`M ${xx} ${yy-7} l -5 10 h 10 Z`:`M ${xx} ${yy+7} l -5 -10 h 10 Z`,fill:buy?'#527347':'#b44b45',stroke:'#f8f7f1','stroke-width':1}));}
+    for(const i of [0,Math.floor(bars.length/2),bars.length-1])svg.append(make('text',{x:x(i),y:H-8,fill:'#6e7266','font-size':14,'text-anchor':i===0?'start':i===bars.length-1?'end':'middle'},bars[i].t.slice(0,10)));
+    svg.append(make('line',{id:'lab-cursor',x1:x(Number($('lab-day').value)),x2:x(Number($('lab-day').value)),y1:T,y2:H-27,stroke:'#68745c','stroke-dasharray':'4 4'}));
     svg.addEventListener('pointerdown',e=>{const box=svg.getBoundingClientRect(),pos=(e.clientX-box.left)/box.width*W;$('lab-day').value=Math.max(0,Math.min(bars.length-1,Math.round((pos-L)/(W-L-R)*(bars.length-1))));drawDay();});
     $('lab-price').replaceChildren(svg);
   }
@@ -66,7 +66,7 @@ export function createStrategyLab({api,chart,onSaved,onAuto}){
   function renderResults(){const m=report.metrics,last=report.curve.at(-1),bench=last.benchmark/100000-1,delta=m.total_return-bench;
     const cards=[['策略总收益',percent(m.total_return)],['同仓位持有',percent(bench)],['最大回撤',percent(m.max_drawdown)],['买卖成交笔数',String(m.trade_count)]];
     $('lab-metrics').replaceChildren(...cards.map(([label,v])=>{const n=el('div');n.append(el('span','',label),el('strong','',v));return n;}));
-    chart('lab-equity',report.curve,[{key:'equity',name:'策略',color:'#63e0c7'},{key:'benchmark',name:'同仓位持有',color:'#799dc5'}]);chart('lab-drawdown',report.curve,[{key:'drawdown',name:'回撤',color:'#ff8694'}],percent);
+    chart('lab-equity',report.curve,[{key:'equity',name:'策略',color:'#527347'},{key:'benchmark',name:'同仓位持有',color:'#627d9b'}]);chart('lab-drawdown',report.curve,[{key:'drawdown',name:'回撤',color:'#b44b45'}],percent);
     set('lab-result-state',snapshot?(savedMatches()?'已保存真实回测':'真实快照 · 未保存参数预览'):'教学数据计算结果');
     set('lab-reading',`在 ${report.curve[0].t.slice(0,10)} 至 ${last.t.slice(0,10)} 的回测区间，策略收益${delta>=0?'高于':'低于'}同仓位持有 ${Math.abs(delta*100).toFixed(2)} 个百分点，累计模拟成本 ${dollars(m.total_cost)}。${snapshot?'这是该段历史上的结果。':'这些数值只说明规则如何计算，不用于评价实际盈利能力。'}调整慢周期会改变预热长度及可回测区间。`);
     const paragraphs=[`我们研究的是单标的、日频、只做多的 ${TITLES[config.type]} 策略。${rule(config)}`,`本次展示使用${snapshot?sourceName+' 的 '+sourceSymbol+' 历史快照':'固定生成的教学数据，并非真实市场'}，共 ${bars.length} 根日线。回测仓位为 ${percent(config.allocation)}，单边成本为 ${config.cost_bps} 基点。信号只使用已完成日线，回测在下一交易日开盘执行。`,`本次计算总收益为 ${percent(m.total_return)}，同仓位买入持有为 ${percent(bench)}，最大回撤为 ${percent(m.max_drawdown)}，发生 ${m.trade_count} 笔买卖。${snapshot?'这些是历史回测结果，不是模拟账户实际收益。':'教学数值不能作为策略有效的市场证据。'}`,`策略的局限是${config.type==='sma'?'均线反应滞后，横盘时可能反复买卖并累积成本':config.type==='momentum'?'历史涨跌不保证延续，趋势反转时可能退出较晚':'下跌时仍持续持有，缺少策略退出机制'}。调参后的历史表现不等于样本外有效，更不证明未来盈利。`,`真实回测保存后，可以把同一规则带入自动策略页，单独设置预算并授权启动。后台会计算信号、执行风控、提交模拟委托并对账；是否成交以券商回报为准。`];
