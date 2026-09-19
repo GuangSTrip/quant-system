@@ -23,3 +23,13 @@ assert.equal(
 );
 
 console.log("Artifact is valid ESM and exports default.fetch");
+// Verify embedded research assets, not just JavaScript syntax: report generation
+// must finish before bundling or a larger JSON file can be captured mid-write.
+for (const name of ['library-demo.json','modular-daily-results.json','daily-refinement.json']) {
+  const response=await workerModule.default.fetch(new Request('http://localhost/'+name),{});
+  assert.equal(response.status,200);
+  const packaged=await response.json();
+  const original=JSON.parse(await readFile(resolve(projectRoot,'src',name),'utf8'));
+  assert.deepEqual(packaged,original, name+' must match the complete source report');
+}
+console.log('Embedded research JSON is complete and matches source reports');
