@@ -151,7 +151,7 @@ def allocate(study,day,ids,active,allocation):
     w[ids]=base
     return w
 
-def execute(study,day,target,cash,units,fee):
+def execute(study,day,target,cash,units,fee,fills=None):
     """Opening-price fills; budgets and liquidity available before this session only."""
     p=study.panel
     price=np.where(np.isfinite(p.opens[day]) & (p.opens[day]>0),p.opens[day],p.valuation[day-1])
@@ -173,6 +173,10 @@ def execute(study,day,target,cash,units,fee):
     if need>cash:buy*=max(0.,cash)/need
     cash-=buy.sum()*(1+fee)
     units+=np.divide(buy,price,out=np.zeros(len(units)),where=price>0)
+    if fills is not None:
+        for side,amounts in [('sell',sell),('buy',buy)]:
+            for i in np.flatnonzero(amounts>0):
+                fills.append({'t':p.dates[day],'symbol':p.symbols[i],'side':side,'qty':float(amounts[i]/price[i]),'price':float(price[i]),'cost':float(amounts[i]*fee)})
     return float(cash),float((sell.sum()+buy.sum())*fee),float(sell.sum()+buy.sum()),int(np.count_nonzero(sell)+np.count_nonzero(buy))
 
 def apply_risk_policy(study,day,weights,policy,equity,peak):
@@ -241,8 +245,10 @@ def simulate(study,selection,timing,allocation,cost_multiplier=1.,risk_policy=No
         # Known delisting effective date: conservatively write remaining inventory down to zero.
         dead=(study.dead<=int(p.dates[day].replace('-',''))) & (units>0)
         if dead.any():capital_loss+=float(np.nansum(units[dead]*p.valuation[day-1,dead])); units[dead]=0
+        fills=[]
         if day in queue:
-            cash,fee_paid,traded,orders=execute(study,day,queue.pop(day),cash,units,fee)
+            cash,fee_paid,traded,orders=execute(study,day,queue.pop(day),cash,units,fee,fills if trace is not None else None)
+            for fill in fills: fill["signal_t"]=p.dates[day-execution_lag]
             costs+=fee_paid;turnover+=traded;count+=orders
         values=np.nan_to_num(p.valuation[day],nan=0.)*units
         equity=cash+values.sum(); gross=values.sum()/equity
@@ -253,7 +259,7 @@ def simulate(study,selection,timing,allocation,cost_multiplier=1.,risk_policy=No
         if recalc: queue[day+execution_lag] = state.target.copy()
         if trace is not None:
             event={'date':p.dates[day], 'equity':float(equity), 'peak':float(peak),
-                   'rebalanced':recalc, 'state':state.export(p.symbols)}
+                   'rebalanced':recalc, 'state':state.export(p.symbols),'cash':float(cash),'holdings':[{'symbol':p.symbols[i],'qty':float(units[i]),'price':float(p.valuation[day,i])} for i in np.flatnonzero(units>0) if np.isfinite(p.valuation[day,i])],'trades':fills}
             if callable(trace): trace(event)
             else: trace.append(event)
     split=next(i for i,r in enumerate(curve) if r['date']>='2026-01-01')

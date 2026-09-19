@@ -114,7 +114,7 @@ test('replay import retains chronological decisions and rejects mismatched or ov
  const decisions=dates.map(t=>({t,rebalanced:true,reason:'收盘重新计算目标',targets:[{symbol:'SPY',weight:.3}]}));
  const payload={signal:s,config,dates,backtest:{equity:[1,1.01],full:{cagr_pct:5,max_drawdown_pct:-1,total_return_pct:1},decisions}};
  assert.equal((await f.request('/api/v1/portfolio/backtests',payload)).status,200);
- const saved=await f.request('/api/v1/portfolio/report?id='+strategy+'&source=latest');assert.deepEqual(saved.data.report.decisions,decisions);
+ const saved=await f.request('/api/v1/portfolio/report?id='+strategy+'&source=latest');assert.deepEqual(saved.data.report.decisions,decisions.map(d=>({...d,holdings:[]})));
  for(const mutate of [p=>p.backtest.decisions[0].t='2026-01-03',p=>p.backtest.decisions[0].targets[0].weight=2,p=>p.backtest.decisions.pop()]){const bad=structuredClone(payload);mutate(bad);assert.equal((await f.request('/api/v1/portfolio/backtests',bad)).status,400);}
  assert.equal(f.broker.posts().length,0);
 });

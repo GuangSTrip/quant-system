@@ -53,10 +53,12 @@ def produce(study, strategy_id, session):
         raise ValueError('Incomplete last session; missing or unverified suspensions: '+','.join(missing[:10]))
     trace = {}
     decisions = []
+    trades = []
     def capture(event):
         trace.update(event)
         state = event["state"]
-        decisions.append({"t":event["date"],"rebalanced":bool(event["rebalanced"]),
+        trades.extend(event.get("trades", []))
+        decisions.append({"t":event["date"],"rebalanced":bool(event["rebalanced"]),"cash":event["cash"],"holdings":event["holdings"],
             "reason":"收盘重新计算目标，排队至下一交易日开盘" if event["rebalanced"] else "收盘沿用此前目标，未发出新的调仓指令",
             "targets":[{"symbol":canonical_symbol(s,study.market),"weight":float(w)} for s,w in state["target"].items() if w>0]})
     result = simulate(study, **{k:v for k,v in config.items() if k!='market'}, trace=capture)
@@ -81,7 +83,7 @@ def produce(study, strategy_id, session):
     stamps = [datetime.fromisoformat(signal[k].replace('Z','+00:00')) for k in ('data_asof','execute_after','expires_at')]
     if any(s.tzinfo is None for s in stamps) or not stamps[0]<stamps[1]<stamps[2]:
         raise ValueError('Explicit timezone-aware close/next-session calendar required')
-    return {'dates':p.dates[START:],'signal':signal,'backtest':{**result,'decisions':decisions},'state':final,'config':config,
+    return {'dates':p.dates[START:],'signal':signal,'backtest':{**result,'decisions':decisions,'trades':trades},'state':final,'config':config,
             'note':'Adjusted-price fractional research; paper uses raw prices, lots and actual fills. Risk policy follows the replay model equity.'}
 
 

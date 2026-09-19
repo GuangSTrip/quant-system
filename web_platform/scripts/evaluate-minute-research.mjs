@@ -3,7 +3,7 @@ import {readFile,readdir,writeFile,mkdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {ADVANCED_MINUTE_STRATEGY,LIBRARY_STRATEGIES,LIBRARY_MARKETS,runMinuteResearch} from '../src/minute-library.mjs';
 
-const inputs=[{market:'US',symbol:'SPY',path:new URL('../demo-data/SPY-1Min-snapshot.json',import.meta.url)}];
+const inputs=[{market:'US',symbol:'SPY',path:new URL('../demo-data/SPY-1Min-snapshot.json',import.meta.url)},...['HK','CN'].map(market=>({market,symbol:market==='HK'?'0700.HK':'600000.SH',path:new URL('../demo-data/'+market+'-1Min-snapshot.json',import.meta.url)}))];
 const local=new URL('../demo-data/library-inputs/',import.meta.url);
 try{for(const name of (await readdir(local)).filter(x=>x.endsWith('.json')).sort()){
   const path=new URL(name,local),input=JSON.parse(await readFile(path,'utf8'));
@@ -26,7 +26,7 @@ for(const entry of inputs){
     const summarize=(bars,costMultiplier=1)=>{
       if(new Set(bars.map(b=>format.format(new Date(b.t)))).size<2)return null;
       const r=runMinuteResearch(bars,{...args,costMultiplier});
-      return {days:r.days,rows:r.rows,returnPct:100*r.net/r.budget,benchmarkPct:100*r.baselineNet/r.budget,
+      return {days:r.days,rows:r.rows,returnPct:100*r.net/r.initialCapital,benchmarkPct:100*r.baselineNet/r.initialCapital,
         maxDrawdownPct:100*r.maxDrawdown,trades:r.orders.length,totalCost:r.totalCost,openQty:r.openQty};
     };
     try{output.push({market:entry.market,symbol:entry.symbol,strategy:strategy.id,

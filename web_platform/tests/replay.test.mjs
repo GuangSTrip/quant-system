@@ -5,8 +5,8 @@ import {backtest,signalAt,intradayDecision} from '../src/engine.mjs';
 import {runMinuteResearch} from '../src/minute-library.mjs';
 import {engineReplay,minuteReplay,portfolioReplay,replayAt,eventIndices,reportHTML} from '../src/replay-model.mjs';
 const daily=JSON.parse(readFileSync(new URL('../src/classroom-snapshot.json',import.meta.url))),minute=JSON.parse(readFileSync(new URL('../demo-data/SPY-1Min-snapshot.json',import.meta.url)));
-for(const type of ['sma','momentum','buy_hold','opening_range_breakout','vwap_reversion'])test(type+' replay records reconcile equity and remain causal',()=>{
- const bars=type.includes('reversion')||type.includes('breakout')?minute.bars:daily.bars;
+for(const type of ['sma','momentum','buy_hold','opening_range_breakout','vwap_reversion','adaptive_momentum'])test(type+' replay records reconcile equity and remain causal',()=>{
+ const bars=['vwap_reversion','opening_range_breakout','adaptive_momentum'].includes(type)?minute.bars:daily.bars;
  const r=backtest(bars,{symbol:'SPY',type,allocation:.3,budget:2000});const model=engineReplay(r);
  assert.equal(r.decisions.length,r.curve.length);
  for(let i=0;i<r.curve.length;i++){const d=r.decisions[i];assert.equal(d.t,r.curve[i].t);assert.ok(Math.abs(d.cash+d.qty*d.price-r.curve[i].equity)<1e-7);assert.equal(replayAt(model,i).decision,d);}
@@ -19,7 +19,7 @@ for(const type of ['opening_range','vwap_reversion','adaptive_momentum'])test(ty
  assert.equal(m.points.length,m.decisions.length);assert.ok(m.trades.length);
  m.points.forEach((p,i)=>assert.ok(Math.abs(p.equity-m.decisions[i].cash-m.decisions[i].qty*m.decisions[i].price)<1e-7));
  for(const t of m.trades)assert.ok(m.points.some(p=>p.t===t.t));
- const last=m.points.at(-1);assert.ok(Math.abs(last.equity-r.budget-r.net)<1e-7);
+ const last=m.points.at(-1);assert.ok(Math.abs(last.equity-r.initialCapital-r.net)<1e-7);
 });
 test('legacy portfolio reports never fabricate decisions, and exported text is escaped',()=>{
  const m=portfolioReplay({name:'<script>evil()</script>',source:'archive',report:{dates:['2026-01-01','2026-01-02'],equity:[1,1.1],full:{total_return_pct:10,max_drawdown_pct:0}}});

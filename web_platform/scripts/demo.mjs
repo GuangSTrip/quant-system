@@ -42,6 +42,10 @@ if(entered.data.outcome!=='filled'||owned<=0)throw Error('Replay buy failed: '+J
 setReplayBar(sell.signal_t);
 const exited=await h.request('/api/v1/automation/tick',{});
 if(exited.data.outcome!=='filled'||owned!==0)throw Error('Replay sell failed: '+JSON.stringify(exited.data));
+// After illustrating the two fixture fills, expose the full frozen history to new research.
+setReplayBar(allBars.at(-1).t);
+h.broker.clock.is_open=false;
+
 const port=Number(process.env.QUANT_DEMO_PORT||8787);
 http.createServer(async(req,res)=>{
   try{

@@ -78,6 +78,11 @@ class PortfolioReplayTests(unittest.TestCase):
         self.assertAlmostEqual(out['signal']['cash_weight']+sum(t['weight'] for t in out['signal']['targets']),1)
         self.assertEqual([d['t'] for d in out['backtest']['decisions']], out['dates'])
         self.assertEqual(out['backtest']['decisions'][-1]['targets'], out['signal']['targets'])
+        self.assertEqual(len(out['backtest']['trades']), out['backtest']['trade_count'])
+        self.assertTrue(all(t['signal_t']<t['t'] for t in out['backtest']['trades']))
+        self.assertAlmostEqual(sum(t['cost'] for t in out['backtest']['trades']), out['backtest']['cost'], places=2)
+        for event in trace:
+            self.assertAlmostEqual(event['cash']+sum(h['qty']*h['price'] for h in event['holdings']), event['equity'], places=6)
         for row, event in zip(out['backtest']['decisions'], trace):
             self.assertEqual(row['rebalanced'], event['rebalanced'])
             self.assertEqual({t['symbol']:t['weight'] for t in row['targets']}, {s:w for s,w in event['state']['target'].items() if w>0})

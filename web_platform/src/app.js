@@ -1,3 +1,4 @@
+import {createMinuteLab} from './minute-lab.mjs';
 import {createReplayUI} from './replay-ui.mjs';
 import {engineReplay,minuteReplay} from './replay-model.mjs';
 import {backtest} from './engine.mjs';
@@ -41,6 +42,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   const hkTrading=createHKTradingUI(api);
   const portfolioUI=createPortfolioUI($('portfolio-workbench'),api,chart,()=>Boolean(state.session?.operator));
   const classroomReplay=createReplayUI($('classroom-replay'),chart),libraryReplay=createReplayUI($('library-replay'),chart),researchReplay=createReplayUI($('research-replay'),chart);
+  const minuteLab=createMinuteLab($('minute-lab'),r=>{libraryReplay.set(minuteReplay(r));$('library-archive-details').hidden=true;text('library-warning','当前显示本地重算结果 · '+(r.sampleKind==='historical'?'历史数据':'合成数据')+' · '+r.source);});
   const strategyViews=new Set(['replay','daily','portfolio','research','library','strategy']);
   let centerCatalog=[],centerChoice='opening_range_breakout',centerFrequency='minute';
   const basicStrategies=[{id:'opening_range_breakout',name:'开盘区间突破',frequency:'minute'},{id:'vwap_reversion',name:'VWAP 均值回归',frequency:'minute'},{id:'adaptive_momentum',name:'波动率自适应动量',frequency:'minute'},{id:'sma',name:'双均线趋势',frequency:'daily'},{id:'momentum',name:'绝对动量',frequency:'daily'},{id:'buy_hold',name:'买入持有',frequency:'daily'},{id:'daily-lab',name:'组合规则对照研究',frequency:'daily'}];
@@ -52,9 +54,9 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   async function loadCenterCatalog(){try{centerCatalog=(await api('portfolio/catalog')).strategies;centerOptions();}catch{ /* Basic strategies remain available if catalog is offline. */ }}
   function centerTabs(view){
     const combo=centerChoice.includes(':'),lab=centerChoice==='daily-lab',minute=centerFrequency==='minute';
-    const tabs=combo?[['portfolio','回测与组合执行']]:lab?[['daily','规则对照与回测']]:minute?[['library','历史回测报告'],...(centerChoice==='adaptive_momentum'?[]:[['research','配置并回测']])]:[['replay','历史回放与总览'],['research','配置并回测'],['strategy','规则讲解']];
+    const tabs=combo?[['portfolio','回测与组合执行']]:lab?[['daily','规则对照与回测']]:minute?[['library','历史回测报告'],['research','配置并回测']]:[['replay','历史回放与总览'],['research','配置并回测'],['strategy','规则讲解']];
     $('center-tabs').replaceChildren(...tabs.map(([target,label])=>{const b=node('button',target===view?'selected':'',label);b.type='button';b.setAttribute('aria-pressed',String(target===view));b.onclick=()=>openCenter(target);return b;}));
-    text('center-capability',combo?'日线组合 · 可查看历史报告、导入重新回测结果，发布信号后授权模拟执行。':lab?'日线组合 · 比较选股、择时和仓位规则，查看既有研究结果。':minute?(centerChoice==='adaptive_momentum'?'分钟级 · 当前支持查看已生成的历史报告，未接入参数化回测。':'分钟级 · 支持历史报告与参数化回测；真实覆盖范围取决于行情数据，合成样本会单独标注。'):'日线 · 可直接回放 SPY 冻结历史样本并导出课堂报告；也可配置参数另行回测。');
+    text('center-capability',combo?'日线组合 · 可查看历史报告、导入重新回测结果，发布信号后授权模拟执行。':lab?'日线组合 · 比较选股、择时和仓位规则，查看既有研究结果。':minute?'分钟级 · 三种策略共用决策规则；支持样本参数回测与真实行情回测，真实覆盖范围取决于数据。':'日线 · 可直接回放 SPY 冻结历史样本并导出课堂报告；也可配置参数另行回测。');
   }
   function openCenter(target){
     const combo=centerChoice.includes(':'),minute=centerFrequency==='minute';
@@ -78,7 +80,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
     if(inCenter&&!fromCenter){
       if(view==='replay'){centerFrequency='daily';if(!['sma','momentum','buy_hold'].includes(centerChoice))centerChoice='sma';loadClassroom();}
       else if(view==='library'){centerFrequency='minute';centerChoice=$('library-strategy').value==='opening_range'?'opening_range_breakout':$('library-strategy').value;}
-      else if(view==='research'){centerChoice=$('research-form').elements.type.value;centerFrequency=['opening_range_breakout','vwap_reversion'].includes(centerChoice)?'minute':'daily';}
+      else if(view==='research'){centerChoice=$('research-form').elements.type.value;centerFrequency=['opening_range_breakout','vwap_reversion','adaptive_momentum'].includes(centerChoice)?'minute':'daily';}
       else if(view==='strategy'){centerFrequency='daily';centerChoice=$('lab-form').elements.type.value;}
       else if(view==='daily'){centerFrequency='daily';centerChoice='daily-lab';}
       else if(view==='portfolio'){centerFrequency='daily';centerChoice=$('pf-strategy').value||centerCatalog[0]?.id||'daily-lab';}
@@ -236,17 +238,17 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   }
   function renderReportChart(){if(!state.report)return;const drawdown=state.chartMode==='drawdown',matched=Number.isFinite(state.report.metrics.benchmark_return);$('chart-equity').classList.toggle('selected',!drawdown);$('chart-drawdown').classList.toggle('selected',drawdown);chart('report-chart',state.report.curve,drawdown?[{key:'drawdown',name:'回撤',color:'#b44b45'}]:[{key:'equity',name:'策略',color:'#527347'},{key:'benchmark',name:matched?'同预算日内基准':'买入持有基准',color:'#627d9b'}],drawdown?pct:money);}
   function showReport(r,fillForm=false){
-    if(!r.baseline){centerChoice=r.config.type;centerFrequency=['opening_range_breakout','vwap_reversion'].includes(centerChoice)?'minute':'daily';centerOptions();centerTabs('research');}
+    if(!r.baseline){centerChoice=r.config.type;centerFrequency=['opening_range_breakout','vwap_reversion','adaptive_momentum'].includes(centerChoice)?'minute':'daily';centerOptions();centerTabs('research');}
     researchReplay.set(engineReplay(r));
     state.report=r;state.plan=null;$('backtest-result').hidden=false;$('plan-panel').hidden=true;state.chartMode='equity';text('report-name',r.config.name+(r.baseline?' · 冻结基线':''));
     const m=r.metrics,metrics=[['总收益',pct(m.total_return)],['年化收益',pct(m.cagr)],['夏普（无风险利率 0）',num(m.sharpe)],['最大回撤',pct(m.max_drawdown)],['年化波动',pct(m.volatility)],['日收益 VaR 95%',pct(m.var95)],['交易次数',num(m.trade_count,0)],['累计成本',money(m.total_cost)]];
     $('report-metrics').replaceChildren(...metrics.map(([k,v])=>{const e=node('div');e.append(node('span','',k),node('strong','',v));return e;}));
-    const minute=['opening_range_breakout','vwap_reversion'].includes(r.config.type),rule=minute?(r.config.type==='opening_range_breakout'?'开盘区间突破：突破上沿买入，跌破区间中点卖出':'VWAP 均值回归：跌破 VWAP 阈值买入，回到 VWAP 卖出'):'日线策略';
+    const minute=['opening_range_breakout','vwap_reversion','adaptive_momentum'].includes(r.config.type),rule=minute?(r.config.type==='opening_range_breakout'?'开盘区间突破：突破上沿买入，跌破区间中点卖出':r.config.type==='adaptive_momentum'?'波动率自适应动量：动量与成交量共同确认':'VWAP 均值回归：跌破 VWAP 阈值买入，回到 VWAP 卖出'):'日线策略';
     text('report-provenance','数据来源 '+(r.data_source||'旧版冻结基线')+' · '+rule+' · 标的 '+(r.config.symbol||'多资产')+' · '+(minute?'1 分钟':'日线')+' · '+(minute?'预算 '+money(r.config.budget)+' · 阈值 '+r.config.threshold_bps+' 基点 · 15:45 后平仓 · ':'')+'引擎 '+r.engine+' · 数据 '+r.quality.rows+' 根，'+String(r.quality.from)+' 至 '+String(r.quality.to)+' · 快照 '+(r.snapshot_id||'旧版研究基线')+' · 最新信号 '+(r.signal===1?'持有目标仓位':r.signal===0?'空仓':'不适用')+(r.signal_reason?'（'+r.signal_reason+'）':'')+'。绿色为策略，蓝色为'+(Number.isFinite(r.metrics.benchmark_return)?'同预算、同成本的日内基准。':'买入持有基准（不计成本）。'));
     text('report-limits',r.limitations.join(' '));
     if(r.trades?.length){$('backtest-trades').replaceChildren(...r.trades.slice(-300).map(t=>{const tr=node('tr');[date(t.t),date(t.signal_t),t.side==='buy'?'买入':'卖出',num(t.qty,6),money(t.price),money(t.cost)].forEach(v=>tr.append(node('td','',v)));return tr;}));}else emptyTable('backtest-trades',6,r.baseline?'冻结基线仅保留汇总；逐笔记录见原项目报告。':'当前参数没有触发交易。');
     $('generate-plan').dataset.unavailable=r.baseline?'1':'0';syncAccess();renderReportChart();
-    if(fillForm&&!r.baseline){const f=$('research-form').elements;for(const k of ['name','symbol','type','days','cost_bps'])f[k].value=r.config[k];updateResearchFields();for(const k of minute?['budget','opening_minutes','threshold_bps']:['fast','slow'])f[k].value=r.config[k];if(!minute)f.allocation.value=r.config.allocation*100;}
+    if(fillForm&&!r.baseline){const f=$('research-form').elements;for(const k of ['name','symbol','type','days','cost_bps'])f[k].value=r.config[k];updateResearchFields();for(const k of minute?['budget','opening_minutes','threshold_bps','lookback','volume_multiplier','volatility_multiplier']:['fast','slow'])f[k].value=r.config[k]??({lookback:20,volume_multiplier:1.2,volatility_multiplier:2}[k]??'');if(!minute)f.allocation.value=r.config.allocation*100;}
     $('backtest-result').scrollIntoView({block:'start',behavior:'auto'});
   }
   async function loadShowcase(){
@@ -257,10 +259,10 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
       let auto=null;if(state.session?.operator)try{auto=await api('automation');}catch{}
       const candidate=auto?.state?.backtest_id||records.items[0].id;
       const row=await api('artifact?kind=backtest&id='+encodeURIComponent(candidate)),r=row.payload,c=r.config;
-      const minute=['opening_range_breakout','vwap_reversion'].includes(c.type);
+      const minute=['opening_range_breakout','vwap_reversion','adaptive_momentum'].includes(c.type);
       const sessions=minute?new Set(r.curve.map(point=>String(point.t).slice(0,10))).size:null;
       fill('showcase-data',c.symbol+' · '+(symbolNames[c.symbol]||'美股标的'),c.symbol==='SPY'?'买卖的是 SPY ETF 份额，不是分别买入 500 只成分股。':'本次仅买卖这个代码，不自动扫描全部股票。',(r.data_source||'旧版历史快照')+' · '+(minute?'1 分钟':'日线')+' · '+r.quality.rows+' 根',String(r.quality.from)+' 至 '+String(r.quality.to),'覆盖 '+(sessions??'—')+' 个交易日；分钟策略固定范围：SPY、QQQ、AAPL、MSFT。');
-      const rule=c.type==='opening_range_breakout'?'开盘 '+c.opening_minutes+' 分钟形成区间；收盘价突破上沿 '+c.threshold_bps+' 基点买入，跌破区间中点卖出。':c.type==='vwap_reversion'?'低于当日 VWAP '+c.threshold_bps+' 基点买入，回到 VWAP 卖出。':'按照已保存的日线规则产生信号。';
+      const rule=c.type==='opening_range_breakout'?'开盘 '+c.opening_minutes+' 分钟形成区间；收盘价突破上沿 '+c.threshold_bps+' 基点买入，跌破区间中点卖出。':c.type==='vwap_reversion'?'低于当日 VWAP '+c.threshold_bps+' 基点买入，回到 VWAP 卖出。':c.type==='adaptive_momentum'?'过去 '+c.lookback+' 根分钟线的动量超过波动阈值且成交量确认后买入；动量转负退出。':'按照已保存的日线规则产生信号。';
       fill('showcase-rule','只交易 '+c.symbol+' · '+(symbolNames[c.symbol]||'美股标的'),rule,minute?'单策略预算 '+money(c.budget)+'；15:45 美东时间后发出平仓信号。':'目标仓位 '+pct(c.allocation));
       const net=r.metrics.total_return*100000,gross=net+r.metrics.total_cost;
       fill('showcase-backtest','净盈亏 '+money(net),'交易盈亏（扣成本前）'+money(gross)+'；交易成本 '+money(r.metrics.total_cost),minute?'相当于策略预算的 '+pct(net/c.budget)+'；账户收益率 '+pct(r.metrics.total_return):'账户收益率 '+pct(r.metrics.total_return),minute&&Number.isFinite(r.metrics.benchmark_return)?'同预算日内基准净盈亏 '+money(r.metrics.benchmark_return*100000)+'（含成本）':'基准数据见回测曲线','历史买卖 '+num(r.metrics.trade_count,0)+' 笔 · 最大回撤 '+pct(r.metrics.max_drawdown),c.threshold_bps===0?'触发阈值为 0，微小突破也会交易；频繁买卖放大成本。':'成本与价格波动都会影响净收益。','样本仅 '+(sessions??'—')+' 个交易日，结果不能证明策略长期有效。');
@@ -282,12 +284,12 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
       $('library-symbol').replaceChildren(...symbols.map(symbol=>{const option=node('option','',symbol);option.value=symbol;return option;}));$('library-symbol').value=selected;
       const r=libraryReports.find(x=>x.market===market&&x.symbol===selected&&x.type===type);
       if(!r)throw Error('缺少该市场策略报告');
-      libraryReplay.set(minuteReplay(r));
+      minuteLab.select(market,type);$('library-archive-details').hidden=false;libraryReplay.set(minuteReplay(r));
       const currency=value=>new Intl.NumberFormat('zh-CN',{style:'currency',currency:r.currency,maximumFractionDigits:2}).format(value);
       const fill=(id,...parts)=>$(id).replaceChildren(...parts.map((x,i)=>node(i?'p':'strong','',x)));
       text('library-warning',r.sampleKind==='historical'?'真实历史分钟样本：覆盖 '+r.days+' 个交易日；仍需核对数据质量并做样本外验证。':'固定种子伪随机合成样本：仅验证代码、市场交易限制和展示流程；盈亏不能作为投资结论。');
       fill('library-data',r.symbol+' · '+({US:'美股',HK:'港股',CN:'A股普通股票'}[market]),'来源：'+r.source,'样本：'+r.days+' 个交易日 / '+r.rows+' 根分钟线',r.from+' 至 '+r.to,r.dataFetchedAt?'抓取于 '+r.dataFetchedAt:'合成演示，无抓取时间');
-      fill('library-rule',r.strategyName+' · '+r.level,r.rule,'预算 '+currency(r.budget)+'；单边成本 '+r.costBps+' 基点；交易单位 '+r.lot+' 股。',r.tplus?'A股普通股票 T+1：当日买入不得当日卖出；剩余持仓 '+r.openQty+' 股。':'日内可买卖；样本日收盘前平仓。');
+      fill('library-rule',r.strategyName+' · '+r.level,r.rule,'初始资金 '+currency(r.initialCapital??r.budget)+'；策略预算 '+currency(r.budget)+'；单边成本 '+r.costBps+' 基点；交易单位 '+r.lot+' 股。',r.tplus?'A股普通股票 T+1：当日买入不得当日卖出；剩余持仓 '+r.openQty+' 股。':'日内可买卖；样本日收盘前平仓。');
       fill('library-result',(r.sampleKind==='synthetic'?'合成样本账面变动 ':'策略净盈亏 ')+currency(r.net),(r.sampleKind==='synthetic'?'合成样本基准变动 ':'同预算基准净盈亏 ')+currency(r.baselineNet),'策略交易成本 '+currency(r.totalCost)+'；买卖 '+r.orders.length+' 笔',r.note);
       $('library-compare').replaceChildren(...libraryReports.filter(x=>x.market===market&&x.symbol===selected).map(item=>{const tr=node('tr');for(const value of [item.strategyName,currency(item.net),currency(item.baselineNet),currency(item.totalCost),num(item.orders.length,0),pct(item.maxDrawdown)])tr.append(node('td','',value));const action=node('td'),button=node('button','','查看');button.addEventListener('click',()=>{$('library-strategy').value=item.type;loadLibrary();$('library-replay').scrollIntoView({behavior:'smooth',block:'start'});});action.append(button);tr.append(action);return tr;}));
       chart('library-equity',r.equityCurve,[{key:'equity',name:'策略',color:'#527347'},{key:'benchmark',name:'同预算基准',color:'#627d9b'}],currency);
@@ -300,7 +302,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
     }catch(error){libraryReplay.clear();text('library-warning','报告读取失败：'+error.message);}
   }
   $('library-strategy').addEventListener('change',()=>{centerChoice=$('library-strategy').value==='opening_range'?'opening_range_breakout':$('library-strategy').value;centerFrequency='minute';centerOptions();centerTabs('library');});
-  $('research-form').elements.type.addEventListener('change',()=>{centerChoice=$('research-form').elements.type.value;centerFrequency=['opening_range_breakout','vwap_reversion'].includes(centerChoice)?'minute':'daily';centerOptions();centerTabs('research');});
+  $('research-form').elements.type.addEventListener('change',()=>{centerChoice=$('research-form').elements.type.value;centerFrequency=['opening_range_breakout','vwap_reversion','adaptive_momentum'].includes(centerChoice)?'minute':'daily';centerOptions();centerTabs('research');});
   $('pf-market').addEventListener('change',()=>{centerChoice=$('pf-strategy').value;centerFrequency='daily';centerOptions();centerTabs('portfolio');});
   $('lab-form').elements.type.addEventListener('change',()=>{centerChoice=$('lab-form').elements.type.value;centerFrequency='daily';centerOptions();centerTabs('strategy');});
   $('pf-strategy').addEventListener('change',()=>{centerChoice=$('pf-strategy').value;centerFrequency='daily';centerOptions();centerTabs('portfolio');});
@@ -335,7 +337,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
       if(!plan.order_intentions?.length)emptyTable('current-orders',4,'当前无有效买卖订单。');
     }catch(error){text('daily-warning','策略计划读取失败：'+error.message);}
   }
-  $('daily-market').addEventListener('change',loadCurrentDailyPlan);  function updateResearchFields(){const f=$('research-form').elements,minute=['opening_range_breakout','vwap_reversion'].includes(f.type.value);for(const kind of ['daily','minute'])for(const label of document.querySelectorAll('[data-research-'+kind+']')){const active=(kind==='minute')===minute;label.hidden=!active;label.querySelector('input').disabled=!active;label.querySelector('input').required=active;}for(const option of f.symbol.options)option.disabled=minute&&!minuteSymbols.has(option.value);if(f.symbol.selectedOptions[0]?.disabled)f.symbol.value='SPY';f.days.min=minute?'2':'90';f.days.max=minute?'30':'1095';if(Number(f.days.value)<Number(f.days.min)||Number(f.days.value)>Number(f.days.max))f.days.value=minute?'5':'365';text('research-message',minute?'分钟策略固定范围：SPY、QQQ、AAPL、MSFT；一次仅交易所选 1 个标的。Alpaca IEX 可拉取 2—30 个日历日；本机公开演示快照仅有最近 5 个交易日。':'日线：前一根完整日线产生信号，下一根开盘价模拟成交。');}
+  $('daily-market').addEventListener('change',loadCurrentDailyPlan);  function updateResearchFields(){const f=$('research-form').elements,minute=['opening_range_breakout','vwap_reversion','adaptive_momentum'].includes(f.type.value);for(const kind of ['daily','minute'])for(const label of document.querySelectorAll('[data-research-'+kind+']')){const active=(kind==='minute')===minute;label.hidden=!active;label.querySelector('input').disabled=!active;label.querySelector('input').required=active;}for(const label of document.querySelectorAll('[data-research-adaptive]')){label.hidden=f.type.value!=='adaptive_momentum';label.querySelector('input').disabled=label.hidden;label.querySelector('input').required=!label.hidden;}for(const option of f.symbol.options)option.disabled=minute&&!minuteSymbols.has(option.value);if(f.symbol.selectedOptions[0]?.disabled)f.symbol.value='SPY';f.days.min=minute?'2':'90';f.days.max=minute?'30':'1095';if(Number(f.days.value)<Number(f.days.min)||Number(f.days.value)>Number(f.days.max))f.days.value=minute?'5':'365';text('research-message',minute?'分钟策略固定范围：SPY、QQQ、AAPL、MSFT；一次仅交易所选 1 个标的。Alpaca IEX 可拉取 2—30 个日历日；本机公开演示快照仅有最近 5 个交易日。':'日线：前一根完整日线产生信号，下一根开盘价模拟成交。');}
   $('research-form').elements.type.addEventListener('change',updateResearchFields);updateResearchFields();
   async function runResearch(e){e.preventDefault();return busy(e.submitter,async()=>{try{const f=new FormData(e.target),config=Object.fromEntries(f);config.allocation=Number(config.allocation)/100;const reuse=$('reuse-snapshot').checked;if(reuse&&!state.report?.snapshot_id)throw new Error('请先打开一份真实回测报告再选择快照重跑。');message('research-message','正在读取历史数据并计算，请稍候…');const r=await api('backtests',{config,...(reuse?{snapshot_id:state.report.snapshot_id}:{})});showReport(r,true);message('research-message','回测已持久化。'+(reuse?'本次使用所选报告的原有数据区间，历史天数输入不改变该快照。':''));await loadResearch();}catch(err){message('research-message',err.message,true);}});}
   async function loadBaseline(){return busy($('load-baseline'),async()=>{try{const response=await fetch('/research-baseline.json',{cache:'no-cache'});if(!response.ok)throw new Error('基线文件不可用');const d=await response.json(),m=d.metrics;showReport({baseline:true,config:{name:'原有多资产研究'},engine:'原项目 Python 回测',quality:{rows:d.report.rows,from:d.report.data_start,to:d.report.data_end},metrics:{...m,sharpe:m.sharpe_ratio,volatility:m.annual_volatility,var95:m.value_at_risk_95,total_cost:(m.total_commission||0)+(m.estimated_impact_cost||0)},curve:d.curve.map(x=>({...x,t:x.timestamp})),trades:[],limitations:['冻结研究基线，无法据此生成当前订单。此图采用原项目的多资产基准，数据与当前 Alpaca 账户无关。']});}catch(e){toast(e.message);}});}
@@ -448,7 +450,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   let autoData=null;
   const autoNames={paused:'已暂停',busy:'执行中',market_closed:'等待开市',pending_order:'跟踪挂单',waiting_data:'等待新分钟线',already_evaluated:'本根行情已处理',no_order:'保持仓位',submitted:'已提交',filled:'已成交',fault:'异常暂停',halted:'全局暂停'};
   async function autoReports(){try{const d=await api('artifacts?kind=backtest');$('auto-report').replaceChildren(...d.items.map(r=>{const o=node('option','',r.name+' · '+date(r.created_at));o.value=r.id;return o;}));await syncAutoBudget();}catch(e){message('auto-message',e.message,true);}}
-  async function syncAutoBudget(){const id=$('auto-report').value;if(!id)return;try{const r=await api('artifact?kind=backtest&id='+encodeURIComponent(id)),c=r.payload.config;if(['opening_range_breakout','vwap_reversion'].includes(c.type)){$('auto-budget').value=String(c.budget);message('auto-message','所选分钟策略：'+c.symbol+' / '+c.type+'。预算已同步为回测值 '+money(c.budget)+'；启动时会验证一致。');}}catch(e){message('auto-message',e.message,true);}}
+  async function syncAutoBudget(){const id=$('auto-report').value;if(!id)return;try{const r=await api('artifact?kind=backtest&id='+encodeURIComponent(id)),c=r.payload.config;if(['opening_range_breakout','vwap_reversion','adaptive_momentum'].includes(c.type)){$('auto-budget').value=String(c.budget);message('auto-message','所选分钟策略：'+c.symbol+' / '+c.type+'。预算已同步为回测值 '+money(c.budget)+'；启动时会验证一致。');}}catch(e){message('auto-message',e.message,true);}}
   $('auto-report').addEventListener('change',syncAutoBudget);
   async function loadAutomation(){if(!state.session?.operator)return;try{const d=await api('automation');autoData=d;renderBudgetLimit(d.limits);const s=d.state;$('auto-status').replaceChildren(details([['策略状态',({paused:'已暂停',awaiting_execution:'已授权 · 等待首次执行',manual_checked:'已手动检查 · 等待后续执行',scheduled_checked:'后台已执行 · 继续监测',awaiting_scheduler:'等待后台恢复'})[s.execution_state]||'状态待确认'],['策略 / 标的',s.config?s.config.name+' / '+s.config.symbol:'尚未部署'],['预算',money(s.budget)],['后台连接',d.scheduler.healthy?'已收到心跳':'未收到近期心跳'],['最近后台心跳',date(s.heartbeat_at)],['最近执行',date(s.last_check_at)],['执行来源',({manual:'网页手动检查',github:'后台定时任务',cloudflare:'云端定时任务'})[s.last_execution_source]||'尚未执行'],['运行说明',s.reason]]));message('auto-scheduler-note',d.scheduler.healthy?'':(d.scheduler.configured?'后台近期未响应，持续自动执行暂不可靠。可以保存启动授权，再点击“立即检查一轮”执行；后台恢复后也会继续执行已授权策略。':'尚未配置后台调度。可以授权后手动检查一轮，关闭网页不会因此获得持续执行能力。'));$('auto-tick').dataset.unavailable=s.enabled?'0':'1';syncAccess();if(!d.cycles.length)emptyTable('auto-cycles',4,'暂无运行记录，后台心跳不会自行启动策略。');else $('auto-cycles').replaceChildren(...d.cycles.map(r=>{const tr=node('tr');for(const v of [date(r.created_at),{github:'后台定时',cloudflare:'云端定时',manual:'立即检查'}[r.source]||r.source,autoNames[r.outcome]||r.outcome,(r.details.message||'')+(r.details.client_order_id?' · '+r.details.client_order_id:'')])tr.append(node('td','',v));return tr;}));if(!$('auto-report').options.length)await autoReports();}catch(e){message('auto-message',e.message,true);}}
   async function autoAction(path,body,button){return busy(button,async()=>{try{message('auto-message','正在处理…');const r=await api('automation/'+path,body);message('auto-message',r.message||(['start','resume'].includes(path)?'启动授权已保存。可点击“立即检查一轮”；后台任务到达时也会执行，不必重复启动。':'已完成，请查看最新状态与执行记录。'),r.ok===false);await loadAutomation();await refresh();}catch(e){message('auto-message',e.message,true);}});}

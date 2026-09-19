@@ -1,3 +1,4 @@
+import {replayDetails} from './portfolio-replay.mjs';
 import {createPortfolio,portfolioGuard} from './portfolio.mjs';
 import {buildPortfolioCatalog,instrumentSymbol} from './portfolio-contract.mjs';
 import {tradingState,setTrading,previewHK,submitHK,inspectHK,cancelHK,recoverHK,startHKAuto,pauseHKAuto,resumeHKAuto,tickHK,changeHKConnection,hkPortfolioAdapter} from './longbridge-trading.mjs';
@@ -354,7 +355,7 @@ async function route(request,env){
     if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
     if(path==='/api/v1/equity'){const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
     if(path==='/api/v1/market'){const sym=symbol(url.searchParams.get('symbol'));return json({ok:true,symbol:sym,source:'Alpaca IEX',fetched_at:nowISO(),snapshot:await snapshotQuote(env,sym)});}
-    if(path==='/api/v1/catalog')return json({ok:true,symbols:SYMBOLS,intraday_symbols:INTRADAY_SYMBOLS,engine:ENGINE_VERSION,templates:[{type:'opening_range_breakout',name:'开盘区间突破',timeframe:'1Min',description:'美股开盘观察区间结束后，收盘价突破区间上沿买入；跌破区间中点或 15:45 后卖出。'},{type:'vwap_reversion',name:'VWAP 均值回归',timeframe:'1Min',description:'当日价格低于 VWAP 指定幅度买入；回到 VWAP 或 15:45 后卖出。'},{type:'sma',name:'双均线趋势',timeframe:'1Day',description:'快均线高于慢均线时持有目标仓位，否则空仓。'},{type:'momentum',name:'绝对动量',timeframe:'1Day',description:'慢周期累计收益为正时持有目标仓位，否则空仓。'},{type:'buy_hold',name:'买入持有基准',timeframe:'1Day',description:'始终保持首次买入的目标仓位，用于同区间比较。'}]});
+    if(path==='/api/v1/catalog')return json({ok:true,symbols:SYMBOLS,intraday_symbols:INTRADAY_SYMBOLS,engine:ENGINE_VERSION,templates:[{type:'adaptive_momentum',name:'波动率自适应动量',timeframe:'1Min',description:'历史动量超过波动阈值且成交量确认时买入；负动量或收盘前 15 分钟退出。'},{type:'opening_range_breakout',name:'开盘区间突破',timeframe:'1Min',description:'美股开盘观察区间结束后，收盘价突破区间上沿买入；跌破区间中点或 15:45 后卖出。'},{type:'vwap_reversion',name:'VWAP 均值回归',timeframe:'1Min',description:'当日价格低于 VWAP 指定幅度买入；回到 VWAP 或 15:45 后卖出。'},{type:'sma',name:'双均线趋势',timeframe:'1Day',description:'快均线高于慢均线时持有目标仓位，否则空仓。'},{type:'momentum',name:'绝对动量',timeframe:'1Day',description:'慢周期累计收益为正时持有目标仓位，否则空仓。'},{type:'buy_hold',name:'买入持有基准',timeframe:'1Day',description:'始终保持首次买入的目标仓位，用于同区间比较。'}]});
     if(path==='/api/v1/artifacts'){const kind=url.searchParams.get('kind')||'backtest';requireValue(['backtest','strategy','dataset','plan','acceptance'].includes(kind),'类别无效');return json({ok:true,items:await all(db,'SELECT id,kind,name,created_at FROM artifacts WHERE kind=? ORDER BY created_at DESC LIMIT 50',kind)});}
     if(path==='/api/v1/acceptance/report')return json(await acceptanceReport(db,url.searchParams.get('id')));
     if(path==='/api/v1/artifact'){return json({ok:true,...await artifact(db,url.searchParams.get('id'),url.searchParams.get('kind'))});}
@@ -380,9 +381,7 @@ async function route(request,env){
    requireValue(['selection','timing','allocation','risk_policy'].every(k=>(input.config?.[k]||null)===(e.config[k]||null)),'回测配置与注册策略不一致');
    requireValue(Array.isArray(dates)&&dates.length>1&&dates.length<=10000&&dates.every((d,i)=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&(!i||d>dates[i-1])),'回测日期无效');
    requireValue(r&&Array.isArray(r.equity)&&r.equity.length===dates.length&&r.equity.every(n=>typeof n==='number'&&Number.isFinite(n)&&n>0)&&['cagr_pct','max_drawdown_pct','total_return_pct'].every(k=>typeof r.full?.[k]==='number'&&Number.isFinite(r.full[k])),'回测曲线或指标无效');
-   const decisions=r.decisions||[];
-   requireValue(Array.isArray(decisions)&&(!decisions.length||decisions.length===dates.length)&&decisions.every((d,i)=>d&&d.t===dates[i]&&typeof d.rebalanced==='boolean'&&typeof d.reason==='string'&&d.reason.length<=500&&Array.isArray(d.targets)&&d.targets.length<=500&&d.targets.every(t=>t&&typeof t.symbol==='string'&&t.symbol.length<=30&&typeof t.weight==='number'&&Number.isFinite(t.weight)&&t.weight>=0&&t.weight<=1)&&d.targets.reduce((a,t)=>a+t.weight,0)<=1.000001),'逐日决策记录无效');
-   const payload={report:{equity:r.equity,dates,full:r.full,decisions:decisions.map(d=>({t:d.t,rebalanced:d.rebalanced,reason:d.reason,targets:d.targets.map(t=>({symbol:t.symbol,weight:t.weight}))}))},source:'导入的同规则重放回测 · 数据摘要 '+String(input.signal.data_digest).slice(0,16)+' · '+String(input.note||'').slice(0,300)};
+   const payload={report:{equity:r.equity,dates,full:r.full,...replayDetails(r,dates)},source:'导入的同规则重放回测 · 数据摘要 '+String(input.signal.data_digest).slice(0,16)+' · '+String(input.note||'').slice(0,300)};
    return json({ok:true,id:await saveArtifact(db,user,'portfolio_backtest',e.id,payload)});
   }
   if(path==='/api/v1/portfolio/signals')return json(await portfolio.ingest(db,user,input));

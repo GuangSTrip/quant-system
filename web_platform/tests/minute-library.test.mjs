@@ -9,14 +9,14 @@ test('all three strategies run for each market and preserve sample provenance',(
   for(const market of ['US','HK','CN'])for(const strategy of LIBRARY_STRATEGIES){
     const report=demo.reports.find(x=>x.market===market&&x.type===strategy.id);
     assert.ok(report);assert.equal(report.days,5);assert.ok(report.rows>=1000);
-    assert.equal(report.sampleKind,market==='US'?'historical':'synthetic');
+    assert.equal(report.sampleKind,'historical');
     assert.ok(Number.isFinite(report.net));assert.ok(Number.isFinite(report.baselineNet));
     assert.ok(report.equityCurve.length>100);
-    assert.ok(Math.abs(report.equityCurve.at(-1).equity-(report.budget+report.net))<1e-8);
-    assert.ok(Math.abs(report.equityCurve.at(-1).benchmark-(report.budget+report.baselineNet))<1e-8);
+    assert.ok(Math.abs(report.equityCurve.at(-1).equity-(report.initialCapital+report.net))<1e-8);
+    assert.ok(Math.abs(report.equityCurve.at(-1).benchmark-(report.initialCapital+report.baselineNet))<1e-8);
     assert.ok(report.maxDrawdown<=0);
     assert.ok(report.orders.every(order=>report.equityCurve.some(point=>point.t===order.t)));
-    if(market!=='US')assert.ok(Number.isInteger(report.simulationSeed));
+    assert.equal(report.simulationSeed,null);
   }
 });
 test('A-share simulation never sells shares purchased on the same day',()=>{

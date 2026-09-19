@@ -1,8 +1,10 @@
+import {backtest,ENGINE_VERSION,validateBars,numeric} from './engine.mjs';
+import {minuteRule} from './minute-rules.mjs';
 // Research-only minute strategies. This module never submits broker orders.
 export const LIBRARY_STRATEGIES=[
-  {id:'opening_range',name:'① 开盘区间突破',level:'基础',rule:'观察开盘前 15 根分钟线；收盘价突破区间上沿买入，跌破区间中点退出。'},
-  {id:'vwap_reversion',name:'② VWAP 均值回归',level:'进阶',rule:'价格比当日成交量加权均价低 0.15% 买入，回到 VWAP 退出。'},
-  {id:'adaptive_momentum',name:'③ 波动率自适应动量',level:'高级',rule:'最近 20 根分钟线涨幅超过其波动阈值、且成交量超过此前均值 1.2 倍时买入；动量转负退出。'}
+  {id:'opening_range',name:'① 开盘区间突破',level:'基础',rule:'观察开盘前 15 分钟；收盘突破上沿 20 基点买入，跌破中点退出；收盘前 15 分钟退出。'},
+  {id:'vwap_reversion',name:'② VWAP 均值回归',level:'进阶',rule:'典型价格 (H+L+C)/3 加权 VWAP；低于 VWAP 20 基点买入，回到 VWAP 退出。'},
+  {id:'adaptive_momentum',name:'③ 波动率自适应动量',level:'高级',rule:'最近 20 根分钟线涨幅超过其波动阈值（至少 20 基点）、且成交量超过此前均值 1.2 倍时买入；动量转负退出。'}
 ];
 // Experimental candidate. Kept out of the default three-strategy teaching library.
 export const ADVANCED_MINUTE_STRATEGY={id:'volume_vwap_breakout',name:'成交量与 VWAP 确认的开盘突破',rule:'开盘 15 分钟区间上沿突破，同时价格高于当日 VWAP、上一分钟量高于前 20 分钟均量 1.2 倍；跌回区间中点或 VWAP 退出。'};
@@ -48,17 +50,25 @@ function evidence(bars,i,type){
   const recent=bars.slice(i-20,i),r=recent.slice(1).map((x,j)=>x.c/recent[j].c-1),sigma=Math.sqrt(average(r.map(x=>x*x))),rise=b.c/recent[0].c-1;
   return `20 分钟涨幅 ${f(rise*100)}% / 波动阈值 ${f(Math.max(.0015,sigma*2)*100)}% / 本分钟量 ${b.v} / 量门槛 ${f(average(recent.map(x=>x.v))*1.2)}`;
 }
-export function runMinuteResearch(raw,{market,type,symbol,budget=100000,costMultiplier=1}={}){
+export function runMinuteResearch(raw,{market,type,symbol,budget=100000,costMultiplier=1,...parameters}={}){
   const spec=LIBRARY_MARKETS[market];if(!spec||![...LIBRARY_STRATEGIES,ADVANCED_MINUTE_STRATEGY].some(x=>x.id===type))throw Error('未知市场或策略');
   if(!Number.isFinite(costMultiplier)||costMultiplier<0)throw Error('成本倍数必须为非负有限数');
   if(!Array.isArray(raw))throw Error('分钟行情为空');
+  const config={...parameters,symbol,type:type==='opening_range'?'opening_range_breakout':type,budget,days:parameters.days??5,opening_minutes:parameters.opening_minutes??15,threshold_bps:parameters.threshold_bps??20,cost_bps:(parameters.cost_bps??spec.costBps)*costMultiplier};
+  numeric(budget,'策略预算',100,100000);for(const [key,min,max] of [['opening_minutes',5,60],['threshold_bps',0,200],['cost_bps',0,100]])config[key]=numeric(config[key],key,min,max);for(const [key,value,min,max] of [['lookback',20,5,120],['volume_multiplier',1.2,.1,10],['volatility_multiplier',2,.1,10]])config[key]=numeric(config[key]??value,key,min,max);if(!Number.isInteger(config.lookback)||!Number.isInteger(config.opening_minutes))throw Error('分钟窗口必须为整数');
+  raw=validateBars(raw);
+  if(market==='US'&&type!=='volume_vwap_breakout'){
+    const r=backtest(raw,config),days=new Set(r.curve.map(p=>localTime(p.t,market).day)).size;
+    return {market,symbol,type,currency:spec.currency,budget,initialCapital:100000,engine:r.engine,config:r.config,days,rows:r.quality.rows,from:r.quality.from,to:r.quality.to,tplus:0,lot:1,costBps:r.config.cost_bps,net:r.curve.at(-1).equity-100000,baselineNet:r.curve.at(-1).benchmark-100000,totalCost:r.metrics.total_cost,baselineCost:r.metrics.benchmark_cost,openQty:r.decisions.at(-1).qty,maxDrawdown:r.metrics.max_drawdown,orders:r.trades,curve:r.curve,equityCurve:r.curve.map((p,i)=>({...p,price:r.decisions[i].price})),decisions:r.decisions};
+  }
+
   const bars=raw.map(x=>({...x,o:Number(x.o),h:Number(x.h),l:Number(x.l),c:Number(x.c),v:Number(x.v),time:localTime(x.t,market)}))
     .filter(x=>Number.isFinite(Date.parse(x.t))&&[x.o,x.h,x.l,x.c,x.v].every(Number.isFinite)&&x.o>0&&x.h>=Math.max(x.o,x.c)&&x.l<=Math.min(x.o,x.c)&&x.v>=0&&sessions[market].some(([a,z])=>x.time.minute>=a&&x.time.minute<z))
     .sort((a,b)=>a.t.localeCompare(b.t));
   const days=[];for(const b of bars){if(days.at(-1)?.day!==b.time.day)days.push({day:b.time.day,bars:[]});days.at(-1).bars.push(b);}
   if(days.length<2||days.some(d=>d.bars.length<40))throw Error('每个样本日需至少 40 根分钟线，且至少两个交易日');
-  let cash=budget,qty=0,boughtDay='',cost=0,baseline=budget,baselineQty=0,baselineCost=0,peak=budget,maxDrawdown=0;
-  const fee=spec.costBps*costMultiplier/10000,orders=[],curve=[],equityCurve=[],decisions=[];
+  let cash=100000,qty=0,boughtDay='',cost=0,baseline=100000,baselineQty=0,baselineCost=0,peak=100000,maxDrawdown=0;
+  const fee=config.cost_bps/10000,orders=[],curve=[],equityCurve=[],decisions=[];
   function record(bar,save,decision=null){
     const equity=cash+qty*bar.c,benchmark=baseline+baselineQty*bar.c;
     peak=Math.max(peak,equity);const drawdown=equity/peak-1;maxDrawdown=Math.min(maxDrawdown,drawdown);
@@ -66,7 +76,7 @@ export function runMinuteResearch(raw,{market,type,symbol,budget=100000,costMult
     if(save){const point={t:bar.t,equity,benchmark,drawdown,price:bar.c};if(equityCurve.at(-1)?.t===bar.t)equityCurve[equityCurve.length-1]=point;else equityCurve.push(point);}
   }
   function execute(side,price,bar,reason,signalTime=null){
-    const amount=side==='buy'?Math.floor(cash/(price*(1+fee)*spec.lot))*spec.lot:qty;
+    const amount=side==='buy'?Math.floor(Math.min(cash,budget)/(price*(1+fee)*spec.lot))*spec.lot:qty;
     if(amount<=0)return;
     const delta=side==='buy'?amount:-amount,charge=amount*price*fee;
     cash-=delta*price+charge;qty+=delta;cost+=charge;
@@ -78,23 +88,23 @@ export function runMinuteResearch(raw,{market,type,symbol,budget=100000,costMult
     if(spec.tplus&&qty&&boughtDay!==day.day)execute('sell',first.o,first,'T+1：次日开盘退出昨日仓位');
     // The benchmark obeys the same market-specific settlement rule.
     if(spec.tplus&&baselineQty){baseline+=baselineQty*first.o*(1-fee);baselineCost+=baselineQty*first.o*fee;baselineQty=0;}
-    if(!baselineQty){baselineQty=Math.floor(baseline/(first.o*(1+fee)*spec.lot))*spec.lot;baseline-=baselineQty*first.o*(1+fee);baselineCost+=baselineQty*first.o*fee;}
-    record(first,true,{signal:0,reason:'新交易日；等待 20 根分钟线预热'+(spec.tplus?'；昨日持仓在今日开盘退出':'')});
+    if(!baselineQty){baselineQty=Math.floor(Math.min(baseline,budget)/(first.o*(1+fee)*spec.lot))*spec.lot;baseline-=baselineQty*first.o*(1+fee);baselineCost+=baselineQty*first.o*fee;}
+    record(first,true,{signal:0,reason:'新交易日；等待开盘观察与指标预热'+(spec.tplus?'；昨日持仓在今日开盘退出':'')});
     for(let i=1;i<day.bars.length;i++){
-      const previous=i-1,decision=signal(day.bars,previous,type),bar=day.bars[i];
+      const previous=i-1,shared=type!=='volume_vwap_breakout'?minuteRule(day.bars.slice(0,i).map(b=>({...b,minute:b.time.minute})),config,{minute:day.bars[previous].time.minute,close:spec.close}):null,decision=shared?(shared.signal===1?1:shared.signal===0?-1:0):signal(day.bars,previous,type),bar=day.bars[i];
       if(!qty&&decision===1&&(spec.tplus||i<day.bars.length-1))execute('buy',bar.o,bar,([...LIBRARY_STRATEGIES,ADVANCED_MINUTE_STRATEGY].find(x=>x.id===type)).name+'触发',day.bars[previous].t);
       else if(qty&&decision===-1&&(!spec.tplus||boughtDay!==day.day))execute('sell',bar.o,bar,'上一根完整分钟线发出退出信号',day.bars[previous].t);
       if(!spec.tplus&&i===day.bars.length-1){
         if(qty)execute('sell',bar.o,bar,'末根分钟线开盘强制平仓');
         baseline+=baselineQty*bar.o*(1-fee);baselineCost+=baselineQty*bar.o*fee;baselineQty=0;
       }
-      const next=signal(day.bars,i,type),why=i<20?'等待 20 根分钟线预热':next===1?'满足入场条件':next===-1?'满足退出条件':'未触发买卖条件，维持仓位';
-      record(bar,true,{signal:next,reason:why+'；'+evidence(day.bars,i,type)+(spec.tplus&&qty&&boughtDay===day.day?'；T+1 当日持仓不可卖出':'')+(!spec.tplus&&i===day.bars.length-1?'；末根开盘已强制平仓':'')});
+      const current=type!=='volume_vwap_breakout'?minuteRule(day.bars.slice(0,i+1).map(b=>({...b,minute:b.time.minute})),config,{minute:bar.time.minute,close:spec.close}):null,next=signal(day.bars,i,type),why=i<20?'等待 20 根分钟线预热':next===1?'满足入场条件':next===-1?'满足退出条件':'未触发买卖条件，维持仓位';
+      record(bar,true,{signal:current?current.signal:next,reason:(current?current.reason:why+'；'+evidence(day.bars,i,type))+(spec.tplus&&qty&&boughtDay===day.day?'；T+1 当日持仓不可卖出':'')+(!spec.tplus&&i===day.bars.length-1?'；末根开盘已强制平仓':'')});
     }
     // The final minute's close is unknown before that bar completes; forced
     // liquidation above occurs at its open before equity is marked.
     record(last,true);
     curve.push({day:day.day,equity:cash+qty*last.c,baseline:baseline+baselineQty*last.c});
   }
-  const last=days.at(-1).bars.at(-1);return {market,symbol,type,currency:spec.currency,budget,days:days.length,rows:bars.length,from:bars[0].t,to:last.t,tplus:spec.tplus,lot:spec.lot,costBps:spec.costBps*costMultiplier,net:cash+qty*last.c-budget,baselineNet:baseline+baselineQty*last.c-budget,totalCost:cost,baselineCost,openQty:qty,maxDrawdown,orders,curve,equityCurve,decisions};
+  const last=days.at(-1).bars.at(-1);return {market,symbol,type,initialCapital:100000,engine:ENGINE_VERSION,config,currency:spec.currency,budget,days:days.length,rows:bars.length,from:bars[0].t,to:last.t,tplus:spec.tplus,lot:spec.lot,costBps:config.cost_bps,net:cash+qty*last.c-100000,baselineNet:baseline+baselineQty*last.c-100000,totalCost:cost,baselineCost,openQty:qty,maxDrawdown,orders,curve,equityCurve,decisions};
 }
