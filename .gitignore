@@ -13,3 +13,23 @@ web_platform/daily-preview.*.log
 web_platform/demo-*.log
 
 .myquant_bridge_state.sqlite*
+.venv-myquant/
+
+.venv-data/
+configs/portfolio_service.local.json
+
+# Private runtime state and local credentials
+.env
+.env.*
+!.env.example
+.dev.vars*
+.lan/
+.wrangler/
+*.sqlite*
+*.pem
+*.pfx
+*.key
+*.log
+.venv*/
+node_modules/
+configs/*.local.json

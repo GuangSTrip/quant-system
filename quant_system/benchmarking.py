@@ -310,7 +310,7 @@ class BenchmarkRunner:
                 regime_rows.append(
                     {"strategy": name, "regime": regime, **_period_metrics(result, start, end)}
                 )
-            annual = result.equity_curve["equity"].resample("YE").last().pct_change().dropna()
+            annual = result.equity_curve["equity"].resample(pd.offsets.YearEnd()).last().pct_change().dropna()
             for timestamp, value in annual.items():
                 yearly_rows.append(
                     {"strategy": name, "year": timestamp.year, "return": float(value)}

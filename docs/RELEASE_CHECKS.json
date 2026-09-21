@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-21",
+  "web_tests": {
+    "total": 207,
+    "passed": 207,
+    "failed": 0
+  },
+  "python_research": {
+    "total": 77,
+    "passed": 76,
+    "skipped": 1
+  },
+  "python_sdk_environment": {
+    "total": 5,
+    "passed": 5,
+    "note": "Includes SDK-dependent test skipped in the research environment"
+  },
+  "build": "passed",
+  "artifact_validation": "passed",
+  "private_value_scan": "10 known private values checked, no matches",
+  "credential_pattern_review": "Only explicit test fixture password in web_platform/tests/helpers.mjs",
+  "external_acceptance": "See FINAL_DELIVERY.md for pending US market-hours and CN next-day checks"
+}

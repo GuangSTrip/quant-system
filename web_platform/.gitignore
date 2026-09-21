@@ -10,3 +10,4 @@ node_modules/
 .dev.vars*
 worker/
 demo-data/library-inputs/
+.lan/

@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {cnSymbol,cnName} from '../src/cn-symbol.mjs';
+test('A-share entry accepts ordinary and exchange-qualified codes without changing market',()=>{for(const [s,want]of [['600036','SHSE.600036'],['000001','SZSE.000001'],['300750','SZSE.300750'],['600036.sh','SHSE.600036'],['000001.SZ','SZSE.000001'],[' SHSE.600036 ','SHSE.600036']])assert.equal(cnSymbol(s),want);for(const s of ['SPY','288.HK','123','999999','600036<script>'])assert.throws(()=>cnSymbol(s));});
+test('A-share names are available for broker-format holdings',()=>{assert.equal(cnName('SHSE.600036'),'招商银行');assert.equal(cnName('SHSE.600028'),'中国石化');assert.equal(cnName('SZSE.000001'),'平安银行');assert.equal(cnName('SHSE.999999'),'名称暂缺');});

@@ -1,3 +1,4 @@
+import {cnPortfolioAdapter,cnExclusive} from './myquant-portfolio.mjs';
 import {replayDetails} from './portfolio-replay.mjs';
 import {createPortfolio,portfolioGuard} from './portfolio.mjs';
 import {buildPortfolioCatalog,instrumentSymbol} from './portfolio-contract.mjs';
@@ -326,7 +327,7 @@ const portfolio=createPortfolio({catalog:portfolioCatalog,audit,adapters:{
   async reconcile(env,db){requireValue((await reconcile(env,db,{id:'portfolio'})).ok,'账户对账失败',409,'RECONCILIATION_FAILED');},
   async ledger(db,s){return (await all(db,'SELECT * FROM orders WHERE actor=?','portfolio:'+s.run_id)).map(o=>{const b=o.broker_data?JSON.parse(o.broker_data):null,p=JSON.parse(o.payload);return {key:o.client_id.replace(/^qs_/,''),symbol:p.symbol,side:p.side,filled:Number(b?.filled_qty||0),price:Number(b?.filled_avg_price||0)};});},
   async submit(env,db,s,o){return submitOrder(env,db,{id:'portfolio:'+s.run_id},{symbol:o.symbol,side:o.side,qty:o.qty,type:'limit',limit_price:o.price,time_in_force:'day',confirm:true,idempotency_key:o.key},null,{portfolio:true,run_id:s.run_id,revision:s.revision});}
- },HK:hkPortfolioAdapter
+ },HK:hkPortfolioAdapter,CN:cnPortfolioAdapter
 }});
 async function route(request,env){
   const url=new URL(request.url),path=url.pathname,method=request.method;
@@ -338,11 +339,13 @@ async function route(request,env){
   }
   requireValue(method==='GET'||method==='POST','Method not allowed',405);
   const db=database(env);
-  if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);await verifyScheduler(request,env);const result=await scheduledTick(env,db,'github');console.info(JSON.stringify({event:'scheduler_tick',source:'github',at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
+  if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);const identity=await verifyScheduler(request,env);const result=await scheduledTick(env,db,identity.source);console.info(JSON.stringify({event:'scheduler_tick',source:identity.source,at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
   if(method==='GET'){
     if(path==='/api/v1/portfolio/catalog')return json({ok:true,strategies:[...portfolioCatalog.values()].map(({report,...e})=>e)});
+    if(path==='/api/v1/portfolio/explanation')return json(await portfolio.explanation(db,url.searchParams.get('id')));
+    if(path==='/api/v1/portfolio/preview'){await operator(request,env,db);return json(await portfolio.preview(env,db,url.searchParams.get('id'),Number(url.searchParams.get('budget'))));}
     if(path==='/api/v1/portfolio/report'){const e=portfolioCatalog.get(url.searchParams.get('id'));requireValue(e,'策略不存在',404);if(url.searchParams.get('source')==='latest'){const r=await first(db,"SELECT payload FROM artifacts WHERE kind='portfolio_backtest' AND name=? ORDER BY created_at DESC LIMIT 1",e.id);requireValue(r,'尚未导入该策略的重放回测',404);return json({ok:true,...e,...JSON.parse(r.payload)});}return json({ok:true,...e});}
-    if(path==='/api/v1/portfolio'){await operator(request,env,db);return json(await portfolio.state(db));}
+    if(path==='/api/v1/portfolio'){await operator(request,env,db);return json(await portfolio.state(db,env));}
     if(path==='/api/v1/longbridge/trading'){await operator(request,env,db);return json(await tradingState(env,db));}
     if(path==='/api/v1/longbridge/status'){await operator(request,env,db);return json(await connectionStatus(env,db));}
     if(path==='/api/v1/longbridge/overview'){await operator(request,env,db);return json(await connectionOverview(env,db));}
@@ -352,8 +355,8 @@ async function route(request,env){
     if(path==='/api/v1/cn/status'){const user=await operator(request,env,db);return json(await myquantBridge(env,'/v1/status',{actor:user.id}));}
     if(path==='/api/v1/cn/orders'){const user=await operator(request,env,db);return json(await myquantBridge(env,'/v1/orders',{actor:user.id}));}
     if(path==='/api/v1/cn/audit'){const user=await operator(request,env,db);return json(await myquantBridge(env,'/v1/audit',{actor:user.id}));}
-    if(path==='/api/v1/overview'||path==='/api/paper/status')return json(await overview(env,db));
-    if(path==='/api/v1/equity'){const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
+    if(path==='/api/v1/overview'||path==='/api/paper/status'){await operator(request,env,db);return json(await overview(env,db));}
+    if(path==='/api/v1/equity'){await operator(request,env,db);const period=url.searchParams.get('period')||'1M';requireValue(['1W','1M','3M'].includes(period),'时间范围无效');return json({ok:true,source:'Alpaca Paper',fetched_at:nowISO(),history:await broker(env,'/v2/account/portfolio/history?period='+period+'&timeframe=1D&extended_hours=false')});}
     if(path==='/api/v1/market'){const sym=symbol(url.searchParams.get('symbol'));return json({ok:true,symbol:sym,source:'Alpaca IEX',fetched_at:nowISO(),snapshot:await snapshotQuote(env,sym)});}
     if(path==='/api/v1/catalog')return json({ok:true,symbols:SYMBOLS,intraday_symbols:INTRADAY_SYMBOLS,engine:ENGINE_VERSION,templates:[{type:'adaptive_momentum',name:'波动率自适应动量',timeframe:'1Min',description:'历史动量超过波动阈值且成交量确认时买入；负动量或收盘前 15 分钟退出。'},{type:'opening_range_breakout',name:'开盘区间突破',timeframe:'1Min',description:'美股开盘观察区间结束后，收盘价突破区间上沿买入；跌破区间中点或 15:45 后卖出。'},{type:'vwap_reversion',name:'VWAP 均值回归',timeframe:'1Min',description:'当日价格低于 VWAP 指定幅度买入；回到 VWAP 或 15:45 后卖出。'},{type:'sma',name:'双均线趋势',timeframe:'1Day',description:'快均线高于慢均线时持有目标仓位，否则空仓。'},{type:'momentum',name:'绝对动量',timeframe:'1Day',description:'慢周期累计收益为正时持有目标仓位，否则空仓。'},{type:'buy_hold',name:'买入持有基准',timeframe:'1Day',description:'始终保持首次买入的目标仓位，用于同区间比较。'}]});
     if(path==='/api/v1/artifacts'){const kind=url.searchParams.get('kind')||'backtest';requireValue(['backtest','strategy','dataset','plan','acceptance'].includes(kind),'类别无效');return json({ok:true,items:await all(db,'SELECT id,kind,name,created_at FROM artifacts WHERE kind=? ORDER BY created_at DESC LIMIT 50',kind)});}
@@ -371,7 +374,7 @@ async function route(request,env){
   if(path==='/api/v1/auth/logout'){const result=await logout(request,env,db,auditStatement);return json(result.body,200,result.headers);}
   const user=await operator(request,env,db);
   if(path==='/api/v1/cn/orders/preview')return json(await myquantAction(env,db,user,'/v1/orders/preview',input,'order_preview'));
-  if(path==='/api/v1/cn/orders')return json(await myquantAction(env,db,user,'/v1/orders',input,'order_submit'));
+  if(path==='/api/v1/cn/orders')return json(await cnExclusive(db,async()=>{await portfolioGuard(db,'CN');return myquantAction(env,db,user,'/v1/orders',input,'order_submit');}));
   if(path==='/api/v1/cn/orders/cancel')return json(await myquantAction(env,db,user,'/v1/orders/cancel',input,'order_cancel'));
   if(path==='/api/v1/cn/reconcile')return json(await myquantAction(env,db,user,'/v1/reconcile',input,'reconcile'));
   if(path==='/api/v1/cn/control')return json(await myquantAction(env,db,user,'/v1/control',input,'control'));
@@ -387,7 +390,7 @@ async function route(request,env){
   if(path==='/api/v1/portfolio/signals')return json(await portfolio.ingest(db,user,input));
   if(path==='/api/v1/portfolio/quotes')return json(await portfolio.quotes(db,user,input));
   if(path==='/api/v1/portfolio/start')return json(await portfolio.start(env,db,user,input));
-  if(path==='/api/v1/portfolio/pause')return json(await portfolio.pause(db,user,input.market));
+  if(path==='/api/v1/portfolio/pause')return json(await portfolio.pause(db,user,input.market,undefined,env));
   if(path==='/api/v1/portfolio/resume')return json(await portfolio.resume(env,db,user,input));
   if(path==='/api/v1/portfolio/liquidate')return json(await portfolio.liquidate(env,db,user,input));
   if(path==='/api/v1/portfolio/release')return json(await portfolio.release(env,db,user,input));
@@ -452,5 +455,5 @@ async function route(request,env){
   throw new AppError('接口不存在',404,'NOT_FOUND');
 }
 const auto=createAutomation({accountContext,history,snapshotQuote,requireCourseAsset,submitOrder,reconcile,audit,auditStatement,artifact,control,cancelOrders,acquire,release,saveArtifact});
-async function scheduledTick(env,db,source){const results=await Promise.allSettled([auto.tick(env,db,source),tickHK(env,db,source),portfolio.tick(env,db,'US'),portfolio.tick(env,db,'HK')]);if(results[0].status==='rejected')throw results[0].reason;const result=results[0].value;result.longbridge=results[1].status==='fulfilled'?results[1].value:{ok:false,outcome:'fault',message:'长桥调度异常，请核对后恢复'};result.portfolios=results.slice(2).map(r=>r.status==='fulfilled'?r.value:{ok:false,outcome:'fault'});result.ok=result.ok!==false&&result.longbridge.ok!==false&&result.portfolios.every(r=>r.ok!==false);return result;}
+async function scheduledTick(env,db,source){const results=await Promise.allSettled([auto.tick(env,db,source),tickHK(env,db,source),portfolio.tick(env,db,'US'),portfolio.tick(env,db,'HK'),portfolio.tick(env,db,'CN')]);if(results[0].status==='rejected')throw results[0].reason;const result=results[0].value;result.longbridge=results[1].status==='fulfilled'?results[1].value:{ok:false,outcome:'fault',message:'长桥调度异常，请核对后恢复'};result.portfolios=results.slice(2).map(r=>r.status==='fulfilled'?r.value:{ok:false,outcome:'fault'});result.ok=result.ok!==false&&result.longbridge.ok!==false&&result.portfolios.every(r=>r.ok!==false);return result;}
 export default {async scheduled(event,env){requireValue(env.SCHEDULER_NATIVE==='true','原生调度未启用',503);const db=database(env);return scheduledTick(env,db,'cloudflare');},async fetch(request,env){const requestId=crypto.randomUUID();try{const response=await route(request,env);response.headers.set('x-request-id',requestId);return response;}catch(error){const known=error instanceof AppError;const response=json({ok:false,error:known?error.message:'服务暂时不可用，新增交易已阻断；请稍后重试。',code:known?error.code:'SERVICE_UNAVAILABLE',request_id:requestId},known?error.status:503);response.headers.set('x-request-id',requestId);if(!known)console.error('request_failed',requestId,error?.name||'Error');return response;}}};

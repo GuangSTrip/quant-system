@@ -1,0 +1,20 @@
+import https from 'node:https';
+import {readFileSync,writeFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const origin='https://127.0.0.1:8792';
+const credentials=Object.fromEntries(readFileSync(new URL('../.env.local-login',import.meta.url),'utf8').trim().split(/\r?\n/).map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
+const request=(path,body,cookie)=>new Promise((resolve,reject)=>{
+ const req=https.request(origin+path,{ca:readFileSync(new URL('../.lan/server-cert.pem',import.meta.url)),method:body?'POST':'GET',headers:{origin,'content-type':'application/json','x-quant-action':'1',...(cookie?{cookie}:{})}},res=>{const chunks=[];res.on('data',x=>chunks.push(x));res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,text:Buffer.concat(chunks).toString()}));});
+ req.on('error',reject);req.end(body?JSON.stringify(body):undefined);
+});
+assert.equal((await request('/')).status,200);
+const login=await request('/api/v1/auth/login',{username:credentials.USERNAME,password:credentials.PASSWORD});assert.equal(login.status,200,login.text);
+const cookie=login.headers['set-cookie'][0].split(';')[0];
+assert.equal(JSON.parse((await request('/api/v1/session',null,cookie)).text).operator,true);
+const catalog=await request('/api/v1/portfolio/catalog');assert.equal(catalog.status,200);const count=JSON.parse(catalog.text).strategies.length;assert.ok(count>=178);
+assert.equal((await request('/daily-refinement.json')).status,200);
+assert.equal((await request('/api/v1/portfolio',null,cookie)).status,200);
+assert.equal((await request('/api/v1/auth/logout',{},cookie)).status,200);
+assert.equal(JSON.parse((await request('/api/v1/session',null,cookie)).text).operator,false);
+const result={at:new Date().toISOString(),origin,httpsCertificateVerified:true,login:true,logout:true,portfolioCatalogCount:count,portfolioDatabase:true};
+writeFileSync(new URL('../.lan/verification.json',import.meta.url),JSON.stringify(result,null,2));console.log(result);

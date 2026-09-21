@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {verifyScheduler} from '../src/scheduler-auth.mjs';
 const env={SCHEDULER_REPOSITORY:'course/platform',SCHEDULER_REPOSITORY_ID:'123',SCHEDULER_OWNER_ID:'456',SCHEDULER_AUDIENCE:'https://platform.example'};
+test('local scheduler requires explicit configuration, pinned origin and secret',async()=>{
+ const local={SCHEDULER_LOCAL_ENABLED:'true',SCHEDULER_LOCAL_SECRET:'x'.repeat(48)};
+ const req=(origin='https://127.0.0.1:8792',secret=local.SCHEDULER_LOCAL_SECRET)=>new Request(origin+'/api/v1/scheduler/tick',{method:'POST',headers:{'x-local-scheduler-secret':secret}});
+ assert.deepEqual(await verifyScheduler(req(),local),{source:'local'});
+ for(const r of [req('http://127.0.0.1:8792'),req('https://example.com'),req(undefined,'wrong')])await assert.rejects(verifyScheduler(r,local));
+ await assert.rejects(verifyScheduler(req(),{}));
+ await assert.rejects(verifyScheduler(req(),{...local,SCHEDULER_LOCAL_ENABLED:'false'}));
+});
 const pair=await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
 const jwk={...await crypto.subtle.exportKey('jwk',pair.publicKey),kid:'fixture-key'};
 const b64=value=>Buffer.from(value).toString('base64url');

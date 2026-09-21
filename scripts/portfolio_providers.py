@@ -14,6 +14,20 @@ def iso(value):
     if value.tzinfo is None: raise ValueError('Provider returned a timezone-naive timestamp')
     return value.astimezone(UTC).isoformat().replace('+00:00','Z')
 
+def longbridge_quote_iso(value):
+    # SDK python/src/time.rs uses datetime.fromtimestamp(epoch, None): naive
+    # values are SYSTEM LOCAL time, not UTC or necessarily exchange-local time.
+    return iso(value.astimezone(UTC))
+
+
+def fresh_quotes(snapshot, now):
+    if not snapshot:
+        return snapshot
+    # An illiquid stock's old last trade must not block every other stock's feed.
+    return {**snapshot, 'instruments': [q for q in snapshot['instruments']
+        if -5 <= (now-datetime.fromisoformat(q['asof'].replace('Z','+00:00'))).total_seconds() <= 120]}
+
+
 def session_from_calendar(sessions, now):
     # Wait 15 minutes after the market close for providers to finalize daily bars.
     completed=[s for s in sessions if s['close']+timedelta(minutes=15)<=now]
@@ -84,7 +98,11 @@ class LongbridgeData:
         from longbridge.openapi import Period,AdjustType
         result={}
         for symbol in symbols:
-            bars=self.context.history_candlesticks_by_date(symbol,Period.Day,AdjustType.ForwardAdjust,date(2024,1,1),date.fromisoformat(end))
+            try:
+                bars=self.context.history_candlesticks_by_date(symbol,Period.Day,AdjustType.ForwardAdjust,date(2024,1,1),date.fromisoformat(end))
+            except Exception as error:
+                print('HK history failed',symbol,str(error)[:160],flush=True)
+                raise
             result[symbol]=pd.DataFrame([{'date':b.timestamp.astimezone(self.zone).date().isoformat(),
                 'open':float(b.open),'high':float(b.high),'low':float(b.low),'close':float(b.close),'volume':b.volume} for b in bars])
         return result
@@ -93,7 +111,8 @@ class LongbridgeData:
         current=next((s for s in calendar if s['date']==now.astimezone(self.zone).date().isoformat()),None)
         local=now.astimezone(self.zone)
         is_open=bool(current and current['open']<=now<current['close'] and not time(12)<=local.time()<time(13))
-        if not is_open or not symbols:return None
+        if not is_open:return {'market':'HK','asof':iso(now),'is_open':False,'instruments':[]}
+        if not symbols:return None
         records=[]
         for offset in range(0,len(symbols),50):
             chunk=symbols[offset:offset+50];info={x.symbol:x for x in self.context.static_info(chunk)}
@@ -101,7 +120,7 @@ class LongbridgeData:
                 i=info[q.symbol]
                 if i.currency!='HKD':raise ValueError('Non-HKD security in HK adapter')
                 records.append({'symbol':q.symbol,'price':float(q.last_done),'lot':i.lot_size,
-                    'tradable':q.trade_status==TradeStatus.Normal,'asof':iso(q.timestamp)})
+                    'tradable':q.trade_status==TradeStatus.Normal,'asof':longbridge_quote_iso(q.timestamp)})
         if {r['symbol'] for r in records}!=set(symbols):raise ValueError('Incomplete quote snapshot')
         return {'market':'HK','asof':iso(now),'is_open':is_open,'instruments':records}
 

@@ -72,6 +72,20 @@ class FakeGM:
 
 
 class MyQuantBridgeTests(unittest.TestCase):
+    def test_terminal_available_includes_today_but_bridge_enforces_t1(self):
+        p={"symbol":"SHSE.600036","volume":"100","volume_today":"100","available":"100","order_frozen":"0"}
+        self.account._positions=[p]
+        self.bridge.refresh(self.context)
+        self.assertEqual(self.bridge.view()["positions"][0]["available_now"],0)
+        with self.assertRaises(BridgeError) as error:
+            self.bridge.preview({"client_id":"t1_test_123456789", "symbol":"SHSE.600036", "side":"sell", "quantity":100, "type":"limit", "limit_price":41},"tester")
+        self.assertEqual(error.exception.code,"INSUFFICIENT_POSITION")
+        p["volume_today"]="0";self.bridge.refresh(self.context)
+        self.assertEqual(self.bridge._position_available("SHSE.600036"),100)
+        p.update(volume="300",volume_today="100",available="250",order_frozen="50")
+        self.bridge.refresh(self.context)
+        self.assertEqual(self.bridge._position_available("SHSE.600036"),150)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = BridgeStore(str(Path(self.tmp.name) / "state.sqlite"))
@@ -205,10 +219,21 @@ class MyQuantBridgeTests(unittest.TestCase):
         self.assertEqual(rejected.exception.code, 401)
         request = Request(address, headers={"X-MyQuant-Bridge-Secret": "bridge-secret"})
         with urlopen(request) as response:
+            self.assertEqual(response.version, 11)
+            self.assertEqual(response.headers.get('Connection'), 'close')
             body = response.read().decode("utf-8")
         self.assertIn('"connected":true', body)
         self.assertNotIn("account-1", body)
         self.assertNotIn("MYQUANT_SIM_TOKEN", body)
+
+    def test_portfolio_ledger_is_complete_and_isolated_by_actor(self):
+        for i in range(105):
+            self.store.intent(AshareOrder.from_payload(self.order(client_id=f'cn-ledger-{i:04d}')), 'portfolio:test-run')
+        self.store.intent(AshareOrder.from_payload(self.order(client_id='cn-other-0001')), 'other')
+        self.assertEqual(len(self.store.orders()), 100)
+        self.assertEqual(len(self.store.ledger('portfolio:test-run')), 105)
+        self.assertEqual(self.store.ledger('portfolio:other-run'), [])
+        with self.assertRaises(BridgeError):self.store.ledger('other')
 
 
 if __name__ == "__main__":

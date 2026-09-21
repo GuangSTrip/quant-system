@@ -1,0 +1,7 @@
+# Dedicated .venv-data environment; do not install into the gmtrade bridge venv.
+gm==3.0.186
+longbridge==4.5.0
+numpy==1.26.4
+pandas==1.5.3
+PyYAML==6.0.3
+scipy==1.15.3

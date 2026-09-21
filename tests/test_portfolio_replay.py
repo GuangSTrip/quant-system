@@ -12,7 +12,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from evaluate_modular_daily import Study,simulate,DecisionState,decide_close
 from evaluate_dynamic_stock_selection import Panel
 from portfolio_signal import catalog,produce
-from portfolio_providers import session_from_calendar
+from portfolio_providers import session_from_calendar,longbridge_quote_iso,fresh_quotes
 from portfolio_service import refresh,run_once
 
 
@@ -88,6 +88,13 @@ class PortfolioReplayTests(unittest.TestCase):
             self.assertEqual({t['symbol']:t['weight'] for t in row['targets']}, {s:w for s,w in event['state']['target'].items() if w>0})
         s.panel.closes[-1,1]=np.nan
         with self.assertRaisesRegex(ValueError,'Incomplete'):produce(s,key,session)
+
+    def test_longbridge_naive_system_local_time_and_fresh_quote_filter(self):
+        epoch=1790000000
+        self.assertEqual(longbridge_quote_iso(datetime.fromtimestamp(epoch)),datetime.fromtimestamp(epoch,timezone.utc).isoformat().replace('+00:00','Z'))
+        now=datetime.now(timezone.utc)
+        snapshot={'is_open':True,'instruments':[{'symbol':'1.HK','asof':now.isoformat()},{'symbol':'2.HK','asof':(now-timedelta(minutes=10)).isoformat()}]}
+        self.assertEqual([q['symbol'] for q in fresh_quotes(snapshot,now)['instruments']],['1.HK'])
 
     def test_calendar_uses_actual_holiday_and_half_day_sessions_with_finalization_delay(self):
         utc=timezone.utc

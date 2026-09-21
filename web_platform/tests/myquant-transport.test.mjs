@@ -21,6 +21,19 @@ test('MyQuant bridge rejects non-HTTPS configuration and unexpected paths before
   await assert.rejects(()=>myquantBridge(env,'/v1/../../orders'),/路径无效/);
 });
 
+test('explicit local bridge accepts only the pinned loopback origin',async()=>{
+  const local={...env,MYQUANT_BRIDGE_LOCAL_ONLY:'true',MYQUANT_BRIDGE_URL:'http://127.0.0.1:8765'};
+  const original=globalThis.fetch;let called=0;
+  globalThis.fetch=async url=>{called++;assert.equal(String(url),'http://127.0.0.1:8765/v1/status');return Response.json({ok:true});};
+  try{
+    assert.equal((await myquantBridge(local,'/v1/status')).ok,true);
+    for(const url of ['http://localhost:8765','http://10.250.27.137:8765','http://127.0.0.1:8766','http://127.0.0.1:8765/private','http://127.0.0.1:8765?url=http://other']){
+      await assert.rejects(()=>myquantBridge({...local,MYQUANT_BRIDGE_URL:url},'/v1/status'),/HTTPS/);
+    }
+    assert.equal(called,1);
+  }finally{globalThis.fetch=original;}
+});
+
 test('MyQuant routes require login and same-origin actions before forwarding',async t=>{
   const {setup}=await import('./helpers.mjs');const f=setup(t);Object.assign(f.env,env);
   const calls=[];globalThis.fetch=async(url,init)=>{calls.push({url:String(url),init});return Response.json({ok:true,bridge:{connected:true},orders:[]});};

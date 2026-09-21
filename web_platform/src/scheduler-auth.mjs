@@ -3,6 +3,17 @@ const ISSUER='https://token.actions.githubusercontent.com';
 let cached=null;
 const decode=s=>Uint8Array.from(atob(s.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));
 export async function verifyScheduler(request,env,fetcher=fetch){
+  if(request.headers.has('x-local-scheduler-secret')){
+    requireValue(env.SCHEDULER_LOCAL_ENABLED==='true'&&String(env.SCHEDULER_LOCAL_SECRET||'').length>=32,'本机调度未配置',503,'SCHEDULER_UNAVAILABLE');
+    requireValue(new URL(request.url).origin==='https://127.0.0.1:8792'&&request.method==='POST','本机调度入口无效',401,'SCHEDULER_UNAUTHORIZED');
+    const hash=async s=>new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)));
+    const supplied=request.headers.get('x-local-scheduler-secret');
+    requireValue(supplied.length<=256,'调度身份无效',401,'SCHEDULER_UNAUTHORIZED');
+    const [a,b]=await Promise.all([hash(supplied),hash(env.SCHEDULER_LOCAL_SECRET)]);let difference=0;
+    for(let i=0;i<a.length;i++)difference|=a[i]^b[i];
+    requireValue(difference===0,'调度身份无效',401,'SCHEDULER_UNAUTHORIZED');
+    return {source:'local'};
+  }
   requireValue(env.SCHEDULER_REPOSITORY&&env.SCHEDULER_REPOSITORY_ID&&env.SCHEDULER_OWNER_ID&&env.SCHEDULER_AUDIENCE,'后台调度尚未配置',503,'SCHEDULER_UNAVAILABLE');
   const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');
   requireValue(token.length<20000&&token.split('.').length===3,'调度身份无效',401,'SCHEDULER_UNAUTHORIZED');

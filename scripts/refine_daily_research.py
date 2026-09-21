@@ -14,10 +14,10 @@ CN_NAMES={'earnings_value':'盈利收益率选股','dividend_defensive':'红利�
 RISK_NAMES={'risk06':'6%波动目标','risk08':'8%波动目标','cushion07':'7%净值缓冲仓位'}
 TIMING_NAMES={'monthly':'每月换股','trend':'120日均线进出','breakout':'55/20日通道进出'}
 
-def china_selection(study):
+def china_selection(study,data_root=None):
     p=study.panel;f=study.features;n=len(p.symbols);lookup={s:i for i,s in enumerate(p.symbols)}
     snaps=[]
-    for path in sorted((ROOT/'data'/'modular_daily'/'CN_basic').glob('*.csv.gz')):
+    for path in sorted(((data_root or ROOT/'data'/'modular_daily')/'CN_basic').glob('*.csv.gz')):
         frame=pd.read_csv(path);ids=frame.ts_code.map(lookup);valid=ids.notna();frame=frame[valid];ids=ids[valid].to_numpy(int)
         values={}
         for col in ['pe_ttm','dv_ttm','total_mv']:

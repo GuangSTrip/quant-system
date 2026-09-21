@@ -6,7 +6,6 @@ A process supervisor should restart on failure. --once is useful for verificatio
 from __future__ import annotations
 import argparse
 import hashlib
-import fcntl
 import json
 import os
 import re
@@ -16,7 +15,10 @@ from datetime import datetime,timezone
 from pathlib import Path
 import numpy as np
 from portfolio_signal import Publisher,catalog,produce,VERSION
-from portfolio_providers import PROVIDERS,session_from_calendar
+from portfolio_providers import PROVIDERS,session_from_calendar,fresh_quotes
+from myquant_data import MyQuantData
+from refine_daily_research import china_selection
+PROVIDERS["myquant"]=MyQuantData
 from evaluate_modular_daily import prepare,ROOT
 
 
@@ -31,7 +33,7 @@ def refresh(provider,symbols,session,folder):
         if frame.date.duplicated().any() or frame.date.tolist()!=sorted(frame.date) or frame.date.iloc[-1]!=session['signal_date']:
             raise ValueError('Missing, duplicate or unordered daily session: '+symbol)
         if not np.isfinite(frame[required].to_numpy(float)).all() or (frame[['open','high','low','close']]<=0).any().any() or (frame.volume<0).any():raise ValueError('Invalid OHLCV')
-        if (frame.high<frame[['open','close','low']].max(axis=1)).any() or (frame.low>frame[['open','close','high']].min(axis=1)).any():raise ValueError('Invalid OHLC relationship')
+        if (frame.high<frame[['open','close','low']].max(axis=1)).any() or (frame.low>frame[['open','close','high']].min(axis=1)).any():raise ValueError('Invalid OHLC relationship: '+symbol+' '+str(frame.loc[(frame.high<frame[["open","close","low"]].max(axis=1)) | (frame.low>frame[["open","close","high"]].min(axis=1)),['date',*required]].head(1).to_dict('records')))
     # No publication before every symbol is validated. Temporary directory isolates partial downloads.
     for symbol,frame in frames.items():frame.to_csv(target/(symbol+'.csv.gz'),index=False,compression='gzip')
     (folder/(market+'_manifest.json')).write_text(json.dumps({'listed_candidates':len(symbols),'requested':len(symbols),'source':type(provider).__name__}))
@@ -44,7 +46,7 @@ def run_once(config,providers,publisher,state):
         if datetime.fromisoformat(session['expires_at'].replace('Z','+00:00'))<=now:
             continue  # final bar publication grace period; no stale signal upload
         symbols=options['symbols']
-        pattern=r'[A-Z][A-Z0-9.-]{0,14}' if market=='US' else r'[1-9][0-9]{0,4}\.HK'
+        pattern=r'[A-Z][A-Z0-9.-]{0,14}' if market=='US' else r'[1-9][0-9]{0,4}\.HK' if market=='HK' else r'\d{6}\.(SH|SZ)'
         if any(not re.fullmatch(pattern,s) for s in symbols):raise ValueError('Invalid provider security id')
         if len(symbols)<30 or len(set(symbols))!=len(symbols):raise ValueError('Each fixed universe requires at least 30 unique symbols')
         fingerprint=hashlib.sha256(json.dumps(symbols,sort_keys=True).encode()).hexdigest()
@@ -61,7 +63,9 @@ def run_once(config,providers,publisher,state):
             if missing:
                 with tempfile.TemporaryDirectory(prefix='portfolio-data-',dir=ROOT/'.paper_state') as temp:
                     folder=Path(temp);refresh(provider,symbols,session,folder)
+                    if market=='CN':provider.fundamentals(symbols,session['signal_date'],folder)
                     study=prepare(market,end_date=session['signal_date'],data_root=folder)
+                    if market=='CN':china_selection(study,folder)
                     for strategy_id in missing:
                         result=produce(study,strategy_id,session)
                         result['note']+=' Provider: '+type(provider).__name__+'; fixed operator universe of '+str(len(symbols))+' securities, different from the repository research universe.'
@@ -74,30 +78,47 @@ def run_once(config,providers,publisher,state):
                 publisher.post('portfolio/signals',result['signal'])
             state[market]=key
             print(market,'published completed-session signals',session['signal_date'],flush=True)
-        if market=='HK':
+        if market in ('HK','CN'):
             # Includes currently managed positions even when they left today's selection.
-            needed=publisher.get('portfolio').get('quote_symbols',{}).get('HK',[])
+            needed=sorted(set(symbols+publisher.get('portfolio').get('quote_symbols',{}).get(market,[])))
             quote=provider.quotes(needed,datetime.now(timezone.utc),calendar)
-            if quote:publisher.post('portfolio/quotes',quote)
+            if quote:publisher.post('portfolio/quotes',fresh_quotes(quote,datetime.now(timezone.utc)))
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--config',type=Path,required=True);parser.add_argument('--once',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--config',type=Path,required=True);parser.add_argument('--once',action='store_true');parser.add_argument('--market',choices=['US','HK','CN']);args=parser.parse_args()
     config=json.loads(args.config.read_text());providers={}
+    if args.market:config['markets']={args.market:config['markets'][args.market]}
     for market,options in config['markets'].items():
         provider=PROVIDERS[options['provider']]()
         if market!=provider.market:raise ValueError('Provider/market mismatch')
         providers[market]=provider
     (ROOT/'.paper_state').mkdir(exist_ok=True)
-    lock=(ROOT/'.paper_state'/'portfolio-producer.lock').open('a')
-    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    lock=(ROOT/'.paper_state'/('portfolio-producer-'+(args.market or 'all')+'.lock')).open('a')
+    if os.name=='nt':
+        import msvcrt
+        lock.seek(0);lock.write('0');lock.flush();lock.seek(0)
+        msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
+    else:
+        import fcntl
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     state={};publisher=Publisher(config['site_origin']);logged=time.monotonic()
     try:
         while True:
             if time.monotonic()-logged>6*3600:
                 publisher.post('auth/logout',{});publisher=Publisher(config['site_origin']);logged=time.monotonic()
-            run_once(config,providers,publisher,state)
-            if args.once:break
+            failures=[]
+            for market,options in config['markets'].items():
+                try:run_once({**config,'markets':{market:options}},providers,publisher,state)
+                except Exception as error:
+                    failures.append(market)
+                    detail=str(error)
+                    for name,value in os.environ.items():
+                        if value and any(k in name for k in ('TOKEN','SECRET','PASSWORD','KEY')):detail=detail.replace(value,'[redacted]')
+                    print(market,'data refresh failed:',type(error).__name__,detail[:240],flush=True)
+            if args.once:
+                if failures:raise RuntimeError('Some markets failed')
+                break
             time.sleep(max(15,min(60,config.get('poll_seconds',30))))
     finally:publisher.post('auth/logout',{})
 

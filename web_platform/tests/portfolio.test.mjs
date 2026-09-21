@@ -23,12 +23,12 @@ test('lot-aware deltas zero removed symbols, reserve fees and never use sale pro
  assert.deepEqual(deltaOrders({targets:[{symbol:'B',weight:.8}],liquidity_caps:{A:1e9,B:1e9}},{A:100},quotes,10000,0,'HK'),[{symbol:'A',side:'sell',qty:100,price:10,lot_size:100}]);
  const buy=deltaOrders({targets:[{symbol:'B',weight:.8}],liquidity_caps:{A:1e9,B:1e9}},{},quotes,10000,2500,'HK');assert.equal(buy[0].qty,100);assert.throws(()=>deltaOrders({targets:[],liquidity_caps:{A:1e9}},{A:101},quotes,10000,500,'HK'));
 });
-test('portfolio catalog/report public; writes require auth/CSRF and CN cannot start',async t=>{
+test('portfolio catalog/report public; writes require auth/CSRF and CN requires a fresh signal',async t=>{
  const f=await fixture(t);assert.equal((await f.request('/api/v1/portfolio/catalog',undefined,{auth:false})).data.strategies.length,178);
  assert.equal((await f.request('/api/v1/portfolio/report?id='+strategy,undefined,{auth:false})).status,200);
  assert.equal((await f.request('/api/v1/portfolio/signals',signal(),{auth:false})).status,401);
  assert.equal((await f.request('/api/v1/portfolio/signals',signal(),{headers:{origin:'https://evil.test'}})).status,403);
- const cn=[...catalog.values()].find(e=>e.market==='CN').id;assert.equal((await f.request('/api/v1/portfolio/start',{strategy_id:cn,budget:1000,confirm:'启动组合自动模拟交易'})).data.code,'ADAPTER_UNAVAILABLE');assert.equal(f.broker.posts().length,0);
+ const cn=[...catalog.values()].find(e=>e.market==='CN').id;assert.equal((await f.request('/api/v1/portfolio/start',{strategy_id:cn,budget:1000,confirm:'启动组合自动模拟交易'})).data.code,'SIGNAL_REQUIRED');assert.equal(f.broker.posts().length,0);
 });
 test('US portfolio trades dynamic assets via existing risk and reconciles actual fills idempotently',async t=>{
  const f=await fixture(t);await start(f);let r=await f.request('/api/v1/portfolio/tick',{market:'US'});assert.equal(r.data.outcome,'submitted',JSON.stringify(r.data));assert.equal(f.broker.posts().length,2);
@@ -38,11 +38,11 @@ test('US portfolio trades dynamic assets via existing risk and reconciles actual
  await f.request('/api/v1/portfolio/pause',{market:'US'});assert.equal((await f.request('/api/v1/orders',orderInput())).data.code,'PORTFOLIO_OWNS_ACCOUNT');
  assert.equal((await f.request('/api/v1/portfolio/release',{market:'US'})).data.code,'NEEDS_FLAT');
 });
-test('portfolio startup requires scheduler, fresh signal, empty account and explicit budget authorization',async t=>{
+test('portfolio startup requires scheduler, fresh signal and explicit budget authorization, retaining existing shares',async t=>{
  const f=await fixture(t),input={strategy_id:strategy,budget:10000,confirm:'启动组合自动模拟交易'};
  assert.equal((await f.request('/api/v1/portfolio/start',input)).data.code,'SIGNAL_REQUIRED');await f.request('/api/v1/portfolio/signals',signal());
  f.env.SCHEDULER_NATIVE='false';assert.equal((await f.request('/api/v1/portfolio/start',input)).data.code,'NO_SCHEDULER');f.env.SCHEDULER_NATIVE='true';
- f.broker.positions=[{symbol:'SPY',qty:'1'}];assert.equal((await f.request('/api/v1/portfolio/start',input)).data.code,'NEEDS_FLAT');
+ f.broker.positions=[{symbol:'SPY',qty:'1'}];assert.equal((await f.request('/api/v1/portfolio/start',input)).status,200);
  assert.equal(f.broker.posts().length,0);
 });
 test('same-date signals immutable; stale quote waits and external position drift pauses',async t=>{
@@ -117,4 +117,88 @@ test('replay import retains chronological decisions and rejects mismatched or ov
  const saved=await f.request('/api/v1/portfolio/report?id='+strategy+'&source=latest');assert.deepEqual(saved.data.report.decisions,decisions.map(d=>({...d,holdings:[]})));
  for(const mutate of [p=>p.backtest.decisions[0].t='2026-01-03',p=>p.backtest.decisions[0].targets[0].weight=2,p=>p.backtest.decisions.pop()]){const bad=structuredClone(payload);mutate(bad);assert.equal((await f.request('/api/v1/portfolio/backtests',bad)).status,400);}
  assert.equal(f.broker.posts().length,0);
+});
+
+
+test('existing same-symbol shares stay outside preview, allocation and liquidation',async t=>{
+ const f=await fixture(t);f.broker.positions=[{symbol:'NVDA',qty:'7',market_value:'700'},{symbol:'SPY',qty:'3',market_value:'300'}];fill(f);
+ const latest=signal();await f.request('/api/v1/portfolio/signals',latest);
+ const preview=await f.request('/api/v1/portfolio/preview?id='+strategy+'&budget=10000');
+ assert.equal(preview.status,200);assert.equal(preview.data.rows.find(r=>r.symbol==='NVDA').held,0);assert.ok(!preview.data.rows.some(r=>r.symbol==='SPY'));assert.equal(preview.data.protected_positions.length,2);
+ await start(f,latest);assert.equal((await f.request('/api/v1/portfolio/tick',{market:'US'})).data.outcome,'submitted');
+ const purchased=Number(f.broker.posts().find(o=>o.payload.symbol==='NVDA').payload.qty);fill(f);
+ assert.equal(Number(f.broker.positions.find(p=>p.symbol==='NVDA').qty),7+purchased);
+ await f.request('/api/v1/portfolio/pause',{market:'US'});
+ await f.request('/api/v1/portfolio/liquidate',{market:'US',confirm:'平仓并停止组合'});
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'US'})).data.outcome,'submitted');
+ const sells=f.broker.posts().filter(o=>o.payload.side==='sell');assert.equal(Number(sells.find(o=>o.payload.symbol==='NVDA').payload.qty),purchased);assert.ok(!sells.some(o=>o.payload.symbol==='SPY'));
+ fill(f);assert.equal((await f.request('/api/v1/portfolio/tick',{market:'US'})).data.outcome,'no_order');
+ assert.equal((await f.request('/api/v1/portfolio/release',{market:'US'})).status,200);
+ assert.equal(Number(f.broker.positions.find(p=>p.symbol==='NVDA').qty),7);assert.equal(Number(f.broker.positions.find(p=>p.symbol==='SPY').qty),3);
+});
+
+test('existing pending orders can finish before the baseline is sealed without cancellation or takeover',async t=>{
+ const f=await fixture(t),old=f.broker.put({symbol:'NVDA',side:'buy',qty:'4',limit_price:'100',client_order_id:'manual-before-start'});
+ await start(f);let r=await f.request('/api/v1/portfolio/tick',{market:'US'});assert.equal(r.data.outcome,'waiting_existing_orders');assert.equal(f.broker.posts().length,0);assert.equal(old.status,'new');
+ // A partial fill remains external, even over repeated scheduler checks.
+ old.filled_qty='2';old.filled_avg_price='100';old.status='partially_filled';f.broker.positions=[{symbol:'NVDA',qty:'2',market_value:'200'}];f.broker.account.cash='99800';f.broker.account.long_market_value='200';
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'US'})).data.outcome,'waiting_existing_orders');
+ old.filled_qty='4';old.status='filled';f.broker.positions[0].qty='4';f.broker.positions[0].market_value='400';f.broker.account.cash='99600';f.broker.account.long_market_value='400';
+ r=await f.request('/api/v1/portfolio/tick',{market:'US'});assert.equal(r.data.outcome,'submitted',JSON.stringify(r.data));
+ const record=JSON.parse(f.db.get("SELECT payload FROM artifacts WHERE kind='portfolio_ownership'").payload);assert.equal(record.positions.NVDA,4);assert.equal(record.awaiting_orders,false);
+ assert.equal(Number(f.broker.posts().find(o=>o.payload.symbol==='NVDA').payload.qty),10);assert.ok(!f.broker.calls.some(c=>c.method==='DELETE'));
+});
+
+test('an untraded waiting strategy can be released without touching manual pending orders',async t=>{
+ const f=await fixture(t);const old=f.broker.put({symbol:'NVDA',side:'buy',qty:'4',limit_price:'100',client_order_id:'manual-wait'});await start(f);
+ await f.request('/api/v1/portfolio/pause',{market:'US'});assert.equal((await f.request('/api/v1/portfolio/release',{market:'US'})).status,200);assert.equal(old.status,'new');assert.equal(f.broker.posts().length,0);
+});
+
+test('startup atomically saves the run and baseline; storage failures cannot leave an unprotected run',async t=>{
+ const f=await fixture(t);await f.request('/api/v1/portfolio/signals',signal());f.db.fail=sql=>sql.startsWith('INSERT INTO artifacts');
+ assert.equal((await f.request('/api/v1/portfolio/start',{strategy_id:strategy,budget:10000,confirm:'启动组合自动模拟交易'})).status,503);
+ assert.equal(f.db.get('SELECT COUNT(*) n FROM portfolio_runs').n,0);assert.equal(f.broker.posts().length,0);
+});
+
+
+test('explicit retirement keeps filled shares as manual holdings for a new strategy, never bypasses pending orders',async t=>{
+ const f=await fixture(t),s=signal();await start(f,s);await f.request('/api/v1/portfolio/tick',{market:'US'});await f.request('/api/v1/portfolio/pause',{market:'US'});
+ const keep={market:'US',keep_positions:true,confirm:'结束策略并保留持仓'};
+ assert.equal((await f.request('/api/v1/portfolio/release',keep)).data.code,'NEEDS_FLAT');fill(f);
+ assert.equal((await f.request('/api/v1/portfolio/release',{...keep,confirm:''})).data.code,'KEEP_POSITIONS_CONFIRM');
+ const before=structuredClone(f.broker.positions),posts=f.broker.posts().length;
+ assert.equal((await f.request('/api/v1/portfolio/release',keep)).status,200);assert.deepEqual(f.broker.positions,before);assert.equal(f.broker.posts().length,posts);
+ const audit=f.db.get("SELECT details FROM events WHERE kind='portfolio_released' ORDER BY timestamp DESC LIMIT 1");assert.equal(JSON.parse(audit.details).ownership_transfer,'manual');
+ await start(f,s);const state=(await f.request('/api/v1/portfolio')).data;assert.equal(state.runs[0].ownership.positions.NVDA,Number(before.find(p=>p.symbol==='NVDA').qty));
+});
+
+for(const action of ['release','resume'])test(`stale ${action} cannot mutate a replacement run with the same revision`,async t=>{
+ const f=await fixture(t);await start(f);await f.request('/api/v1/portfolio/pause',{market:'US'});let replaced=false;
+ f.broker.onGet=async()=>{if(!replaced){replaced=true;f.db.sqlite.exec("UPDATE portfolio_runs SET run_id='replacement-run' WHERE market='US'");}return null;};
+ const r=await f.request('/api/v1/portfolio/'+action,{market:'US',confirm:'启动组合自动模拟交易'});
+ assert.equal(r.status,409,JSON.stringify(r.data));assert.equal(r.data.code,'PORTFOLIO_CHANGED');
+ const saved=f.db.get("SELECT * FROM portfolio_runs WHERE market='US'");assert.equal(saved.run_id,'replacement-run');assert.equal(saved.enabled,0);
+ assert.equal(f.db.get("SELECT COUNT(*) n FROM events WHERE kind=?",action==='release'?'portfolio_released':'portfolio_resumed').n,0);assert.equal(f.broker.posts().length,0);
+});
+
+test('release reports conflict when a concurrent operator changes the revision',async t=>{
+ const f=await fixture(t);await start(f);await f.request('/api/v1/portfolio/pause',{market:'US'});let changed=false;
+ f.broker.onGet=async()=>{if(!changed){changed=true;f.db.sqlite.exec("UPDATE portfolio_runs SET revision=revision+1 WHERE market='US'");}return null;};
+ const r=await f.request('/api/v1/portfolio/release',{market:'US'});assert.equal(r.status,409);assert.equal(r.data.code,'PORTFOLIO_CHANGED');assert.equal(f.db.get('SELECT COUNT(*) n FROM portfolio_runs').n,1);assert.equal(f.db.get("SELECT COUNT(*) n FROM events WHERE kind='portfolio_released'").n,0);
+});
+
+for(const change of ["run_id='new-run'", "lease_id='scheduler-lease',lease_until=9999999999999"])test(`liquidation refuses a concurrent change: ${change}`,async t=>{
+ const f=await fixture(t);await start(f);await f.request('/api/v1/portfolio/pause',{market:'US'});
+ const {createPortfolio}=await import('../src/portfolio.mjs');const events=[];
+ const p=createPortfolio({catalog,adapters:{US:{available:async()=>{f.db.sqlite.exec("UPDATE portfolio_runs SET "+change+" WHERE market='US'");}}},audit:async(...args)=>events.push(args)});
+ await assert.rejects(p.liquidate(f.env,f.db,{id:'tester'},{market:'US',confirm:'平仓并停止组合'}),e=>e.code==='PORTFOLIO_CHANGED');
+ const row=f.db.get("SELECT * FROM portfolio_runs WHERE market='US'");assert.equal(row.enabled,0);assert.ok(!row.exit_requested);assert.equal(events.length,0);assert.equal(f.broker.posts().length,0);
+});
+
+test('portfolio status exposes latest signal expiry so the page can disable expired starts',async t=>{
+ const f=await fixture(t),s=signal();await f.request('/api/v1/portfolio/signals',s);
+ let state=(await f.request('/api/v1/portfolio')).data;assert.equal(state.signals.find(x=>x.strategy_id===strategy).expires_at,s.expires_at);
+ s.expires_at='2020-01-01T00:00:00Z';f.db.sqlite.prepare('UPDATE portfolio_signals SET payload=? WHERE strategy_id=?').run(JSON.stringify(s),strategy);
+ state=(await f.request('/api/v1/portfolio')).data;assert.equal(state.signals.find(x=>x.strategy_id===strategy).expires_at,s.expires_at);
+ assert.notEqual((await f.request('/api/v1/portfolio/start',{strategy_id:strategy,budget:10000,confirm:'启动组合自动模拟交易'})).status,200);assert.equal(f.broker.posts().length,0);
 });

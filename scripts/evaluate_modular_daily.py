@@ -52,12 +52,13 @@ def load_international(market,end_date='2026-09-17',data_root=None):
     dates=[d for d in dates if '2024-01-01'<=d<=end_date]
     def col(key):return np.column_stack([f.reindex(dates)[key].to_numpy(float) for f in frames.values()])
     c=col('close'); o=col('open'); v=col('volume')
-    return Panel(dates,list(frames),o,c,pd.DataFrame(c).ffill().to_numpy(),v,c*v)
+    turnover=col('amount') if all('amount' in f for f in frames.values()) else c*v
+    return Panel(dates,list(frames),o,c,pd.DataFrame(c).ffill().to_numpy(),v,turnover)
 
-def fundamental_rankings(panel):
+def fundamental_rankings(panel,data_root=None):
     n=len(panel.symbols); lookup={s:i for i,s in enumerate(panel.symbols)}
     snapshots=[]
-    for path in sorted((ROOT/'data'/'modular_daily'/'CN_basic').glob('*.csv.gz')):
+    for path in sorted(((data_root or ROOT/'data'/'modular_daily')/'CN_basic').glob('*.csv.gz')):
         df=pd.read_csv(path); dividend=np.full(n,np.nan); value=np.full(n,np.nan)
         ids=df.ts_code.map(lookup); keep=ids.notna(); ids=ids[keep].to_numpy(int); df=df[keep]
         dividend[ids]=df.dv_ttm.to_numpy(float)
@@ -73,7 +74,12 @@ def rank(values,valid):
 
 def prepare(market,end_date='2026-09-17',data_root=None):
     warnings.filterwarnings('ignore',category=RuntimeWarning)
-    if market=='CN':
+    if market=='CN' and data_root is not None:
+        panel=load_international(market,end_date,data_root)
+        listing=json.loads((data_root/'CN_listing.json').read_text(encoding='utf8'))
+        list_dates=np.array([np.datetime64(listing[s]) for s in panel.symbols])
+        dead=np.full(len(panel.symbols),99991231)
+    elif market=='CN':
         panel,list_dates,manifest=load_cn()
         access=json.loads((ROOT/'data'/'universe_access.json').read_text(encoding='utf8'))['lists']
         recs={r['ts_code']:r for r in access['CN_listed']+access['CN_delisted']}
@@ -91,7 +97,7 @@ def prepare(market,end_date='2026-09-17',data_root=None):
        'liquidity':pd.DataFrame(panel.turnover).rolling(20,min_periods=15).median().to_numpy(),
        'observations':np.cumsum(np.isfinite(panel.closes),axis=0),
        'returns':returns.fillna(0).to_numpy()}
-    fundamental=fundamental_rankings(panel) if market=='CN' else []
+    fundamental=fundamental_rankings(panel,data_root) if market=='CN' else []
     selected={s:{} for s in (*SELECTIONS,'benchmark')}
     selection_info={s:[] for s in SELECTIONS}
     for day in range(START,len(panel.dates),21):

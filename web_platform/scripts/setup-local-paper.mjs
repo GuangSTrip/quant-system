@@ -7,7 +7,7 @@ const vars=[
  '# Local paper credentials. Fill only the two Alpaca values; do not commit this file.',
  'ALPACA_PAPER_API_KEY=""','ALPACA_PAPER_API_SECRET=""',
  'AUTH_USERNAME="classroom"',
- 'AUTH_PASSWORD_RECORD='+JSON.stringify(await makePasswordRecord(password)),
+ "AUTH_PASSWORD_RECORD='"+await makePasswordRecord(password)+"'",
  'BROKER_CREDENTIAL_KEY='+JSON.stringify(randomBytes(32).toString('base64')),
  'MYQUANT_BRIDGE_URL=""','MYQUANT_BRIDGE_SECRET=""',
  '# Longbridge keys are entered in the local webpage after login.'

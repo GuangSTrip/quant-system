@@ -89,3 +89,7 @@ export const portfolioDecisions=sqliteTable('portfolio_decisions',{
 export const portfolioQuotes=sqliteTable('portfolio_quotes',{
  market:text('market').primaryKey(),payload:text('payload').notNull(),updatedAt:text('updated_at').notNull()
 });
+
+export const brokerLocks=sqliteTable('broker_locks',{
+ market:text('market').primaryKey(),leaseId:text('lease_id'),leaseUntil:integer('lease_until').notNull().default(0)
+});

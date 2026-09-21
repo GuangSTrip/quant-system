@@ -29,7 +29,7 @@ class BacktestResult:
         self.equity_curve.to_csv(destination / "equity_curve.csv", index_label="timestamp")
         self.trades.to_csv(destination / "trades.csv", index=False)
         self.positions.to_csv(destination / "positions.csv", index=False)
-        monthly = self.equity_curve["equity"].resample("ME").last().pct_change().dropna()
+        monthly = self.equity_curve["equity"].resample(pd.offsets.MonthEnd()).last().pct_change().dropna()
         monthly.rename("return").to_csv(destination / "monthly_returns.csv", index_label="timestamp")
         with (destination / "metrics.json").open("w", encoding="utf-8") as handle:
             json.dump(self.metrics, handle, indent=2, ensure_ascii=False, allow_nan=False)

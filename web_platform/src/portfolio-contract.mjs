@@ -1,6 +1,6 @@
 import {requireValue,numeric} from './engine.mjs';
 export const PORTFOLIO_VERSION='modular-close-1';
-export const MARKETS=Object.freeze({US:{currency:'USD',broker:'alpaca'},HK:{currency:'HKD',broker:'longbridge'},CN:{currency:'CNY',broker:null}});
+export const MARKETS=Object.freeze({US:{currency:'USD',broker:'alpaca'},HK:{currency:'HKD',broker:'longbridge'},CN:{currency:'CNY',broker:'myquant'}});
 export function instrumentSymbol(value,market){
  const s=String(value||'').toUpperCase();
  if(market==='US'){requireValue(/^[A-Z][A-Z0-9.-]{0,14}$/.test(s),'美股证券代码无效');return s;}
@@ -51,6 +51,7 @@ export function deltaOrders(signal,owned,quotes,equity,cash,market,sellsComplete
   const price=market==='US'?Number((q.price*(delta>0?1.001:.999)).toFixed(2)):q.price;
   const cap=signal.liquidity_caps?.[symbol];requireValue(Number.isFinite(cap)&&cap>=0,'缺少落选或持有证券的流动性限额：'+symbol,409,'INSTRUMENT_UNAVAILABLE');
   const qty=Math.min(Math.abs(delta),Math.floor(cap/(price*q.lot))*q.lot);
+  if(market==='CN'&&delta<0&&qty>0)requireValue(Number.isSafeInteger(q.available)&&q.available>=qty,'A股持仓尚不可卖，等待T+1交收',409,'CN_T1');
   if(qty>0)orders.push({symbol,side:delta>0?'buy':'sell',qty,price,lot_size:q.lot});
  }
  // Buys never assume unconfirmed sales have released cash. The next tick follows receipts first.

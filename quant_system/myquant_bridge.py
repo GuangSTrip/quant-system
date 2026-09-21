@@ -10,6 +10,7 @@ are never accepted by this server or returned in responses.
 from __future__ import annotations
 
 import math
+import hashlib
 import hmac
 import json
 import os
@@ -44,6 +45,11 @@ def json_value(value: Any) -> Any:
         return value
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
+    if hasattr(value, 'DESCRIPTOR') and callable(getattr(value, 'ListFields', None)):
+        # Official gmtrade returns protobuf messages, not plain dictionaries.
+        from google.protobuf.json_format import MessageToDict
+        return MessageToDict(value, preserving_proto_field_name=True,
+                             including_default_value_fields=True, use_integers_for_enums=True)
     if isinstance(value, Mapping):
         return {str(key): json_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):
@@ -231,6 +237,13 @@ class BridgeStore:
             rows = self._db.execute("SELECT client_id FROM bridge_orders ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 300)),)).fetchall()
         return [self.order(row["client_id"]) for row in rows]
 
+    def ledger(self, actor: str) -> List[Dict[str, Any]]:
+        if not actor.startswith('portfolio:') or len(actor) > 100:
+            raise BridgeError('无效组合身份', 422, 'INVALID_ACTOR')
+        with self._lock:
+            rows = self._db.execute('SELECT client_id FROM bridge_orders WHERE actor=? ORDER BY created_at', (actor,)).fetchall()
+            return [self.order(row['client_id']) for row in rows]
+
     def update_order(
         self,
         client_id: str,
@@ -385,6 +398,7 @@ class MyQuantBridge:
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "QuantSystemMyQuantBridge/1"
+            protocol_version = "HTTP/1.1"
 
             def log_message(self, _format: str, *_args: Any) -> None:
                 return
@@ -396,6 +410,8 @@ class MyQuantBridge:
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                self.close_connection = True
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -429,6 +445,8 @@ class MyQuantBridge:
                         data = {"ok": True, **bridge.view()}
                     elif path == "/v1/orders":
                         data = {"ok": True, "orders": bridge.store.orders()}
+                    elif path == "/v1/ledger":
+                        data = {"ok": True, "orders": bridge.store.ledger(self._actor())}
                     elif path == "/v1/audit":
                         data = {"ok": True, "events": bridge.store.events()}
                     else:
@@ -469,7 +487,7 @@ class MyQuantBridge:
         return {
             "bridge": {"connected": snap["connected"], "updated_at": snap["updated_at"], "last_error": snap["last_error"]},
             "control": self.store.control(),
-            "account": snap["account"],
+            "account": {**(snap["account"] or {}), "binding": hashlib.sha256(self.account_id.encode()).hexdigest()},
             "positions": snap["positions"],
             "open_orders": snap["open_orders"],
             "orders": self.store.orders(),
@@ -482,6 +500,7 @@ class MyQuantBridge:
             if account is None:
                 raise BridgeError("策略未绑定指定掘金仿真账户", 503, "ACCOUNT_NOT_BOUND")
             positions = redact(json_value(account.positions())) or []
+            positions = [{**p, "available_now": self._sellable(p)} for p in positions]
             open_orders = redact(json_value(self.gm.get_unfinished_orders())) or []
             all_orders = redact(json_value(self.gm.get_orders())) if hasattr(self.gm, "get_orders") else open_orders
             reports = redact(json_value(self.gm.get_execution_reports())) or []
@@ -507,15 +526,27 @@ class MyQuantBridge:
                 if local["status"] != status or local.get("broker") != order:
                     self.store.update_order(local["client_id"], status, actor, order)
 
+    @staticmethod
+    def _sellable(position: Mapping[str, Any]) -> int:
+        try:
+            available = int(float(position.get("available_now", position.get("available", 0))))
+            if "volume_today" in position:
+                volume = int(float(position["volume"]))
+                today = int(float(position["volume_today"]))
+                frozen = int(float(position.get("order_frozen", 0)))
+                if min(volume, today, frozen, available) < 0 or today > volume:
+                    return 0
+                # gmtrade terminal paper reports available including today's buys.
+                # Enforce stock T+1 locally even if the simulator permits T+0.
+                available = min(available, max(0, volume-today-frozen))
+            return max(0, available)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return 0
+
     def _position_available(self, symbol: str) -> int:
         for position in self.snapshot().get("positions") or []:
-            if str(position.get("symbol", "")).upper() != symbol:
-                continue
-            for key in ("available_now", "available"):
-                try:
-                    return int(float(position[key]))
-                except (KeyError, TypeError, ValueError, OverflowError):
-                    continue
+            if str(position.get("symbol", "")).upper() == symbol:
+                return self._sellable(position)
         return 0
 
     def _available_cash(self) -> Optional[float]:

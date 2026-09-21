@@ -11,6 +11,7 @@ import os
 import urllib.request
 import urllib.parse
 import http.cookiejar
+import ssl
 from datetime import datetime, timezone
 from pathlib import Path
 import numpy as np
@@ -98,7 +99,8 @@ class Publisher:
         # Do not forward credentials to redirected hosts.
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args, **kwargs): return None
-        self.client = urllib.request.build_opener(NoRedirect(),urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        context=ssl.create_default_context(cafile=os.environ.get('QUANT_CA_FILE'))
+        self.client = urllib.request.build_opener(NoRedirect(),urllib.request.HTTPSHandler(context=context),urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self.post('auth/login',{'username':os.environ['QUANT_USERNAME'],'password':os.environ['QUANT_PASSWORD']})
 
     def get(self, path):

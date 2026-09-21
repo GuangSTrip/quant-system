@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {setup} from './helpers.mjs';
+import {deltaOrders} from '../src/portfolio-contract.mjs';
+import {cnNative,cnSymbol} from '../src/myquant-portfolio.mjs';
+test('CN symbols and T+1 sell guard reject unsupported or unsettled holdings',()=>{
+ assert.equal(cnNative('600000.SH'),'SHSE.600000');assert.equal(cnSymbol('SZSE.000001'),'000001.SZ');assert.throws(()=>cnNative('430047.BJ'));
+ const q={'600000.SH':{price:10,lot:100,tradable:true,available:0}},signal={targets:[],liquidity_caps:{'600000.SH':1e6}};
+ assert.throws(()=>deltaOrders(signal,{'600000.SH':100},q,10000,9000,'CN'),{code:'CN_T1'});
+ q['600000.SH'].available=100;assert.equal(deltaOrders(signal,{'600000.SH':100},q,10000,9000,'CN')[0].qty,100);
+});
+test('CN portfolio starts, submits once, reads full ledger, and blocks manual competing orders',async t=>{
+ const f=setup(t);Object.assign(f.env,{SCHEDULER_LOCAL_ENABLED:'true',MYQUANT_BRIDGE_URL:'https://cn.test',MYQUANT_BRIDGE_SECRET:'fixture'});
+ const orders=[];let positions=[{symbol:'SHSE.600000',volume:200,available_now:200}],pending=false,halted=false;
+ globalThis.fetch=async(url,init)=>{const path=new URL(url).pathname;const actor=init.headers['x-myquant-actor'];
+  if(path==='/v1/status')return Response.json({ok:true,bridge:{connected:true,updated_at:new Date().toISOString()},control:{halted},account:{binding:'fixture-account',cash:{available:100000},status:{environment:'paper'}},positions,open_orders:pending?[{}]:[],unresolved:0});
+  if(path==='/v1/reconcile')return Response.json({ok:true});
+  if(path==='/v1/ledger')return Response.json({ok:true,orders:orders.filter(o=>o.actor===actor)});
+  if(path==='/v1/orders'){const payload=JSON.parse(init.body);let row=orders.find(o=>o.client_id===payload.client_id);if(!row){row={client_id:payload.client_id,actor,request:payload,status:'pending_new',broker:{filled_volume:0,filled_vwap:0}};orders.push(row);}pending=true;return Response.json({ok:true,order:row});}
+  throw Error('Unexpected '+path);
+ };
+ const id='CN:momentum:monthly:equal:base',day=new Date(Date.now()-86400000).toISOString().slice(0,10);
+ const signal={schema_version:1,strategy_id:id,strategy_version:'modular-close-1',market:'CN',currency:'CNY',available:true,signal_date:day,rebalance_date:day,data_asof:day+'T00:00:00Z',execute_after:new Date(Date.now()-10000).toISOString(),expires_at:new Date(Date.now()+3600000).toISOString(),data_digest:'a'.repeat(64),origin:'fixture',targets:[{symbol:'600000.SH',weight:.1}],liquidity_caps:{'600000.SH':1e6},cash_weight:.9};
+ assert.equal((await f.request('/api/v1/portfolio/signals',signal)).status,200);
+ const start=await f.request('/api/v1/portfolio/start',{strategy_id:id,budget:10000,confirm:'启动组合自动模拟交易'});assert.equal(start.status,200,JSON.stringify(start.data));
+ assert.equal((await f.request('/api/v1/cn/orders',{})).data.code,'PORTFOLIO_OWNS_ACCOUNT');
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'CN'})).data.outcome,'waiting_data');
+ assert.equal((await f.request('/api/v1/portfolio/quotes',{market:'CN',asof:new Date().toISOString(),is_open:true,instruments:[{symbol:'600000.SH',lot:100,price:10,tradable:true,asof:new Date().toISOString()}]})).status,200);
+ let r=await f.request('/api/v1/portfolio/tick',{market:'CN'});assert.equal(r.data.outcome,'submitted',JSON.stringify(r.data));assert.equal(orders.length,1);
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'CN'})).data.outcome,'pending_orders');
+ orders[0].broker={filled_volume:100,filled_vwap:10};pending=false;positions=[{symbol:'SHSE.600000',volume:300,available_now:200}];
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'CN'})).data.outcome,'already_evaluated');assert.equal(orders.length,1);
+ assert.equal((await f.request('/api/v1/portfolio/pause',{market:'CN'})).status,200);
+ assert.equal((await f.request('/api/v1/portfolio/release',{market:'CN'})).data.code,'NEEDS_FLAT');
+ await f.request('/api/v1/portfolio/liquidate',{market:'CN',confirm:'平仓并停止组合'});
+ const waiting=await f.request('/api/v1/portfolio/tick',{market:'CN'});assert.equal(waiting.data.outcome,'waiting_data');assert.equal(orders.length,1);
+ positions[0].available_now=300;
+ assert.equal((await f.request('/api/v1/portfolio/tick',{market:'CN'})).data.outcome,'submitted');assert.equal(orders[1].request.quantity,100);assert.equal(orders[1].request.side,'sell');
+ await f.request('/api/v1/portfolio/pause',{market:'CN'});
+ halted=true;assert.equal((await f.request('/api/v1/portfolio/resume',{market:'CN',confirm:'启动组合自动模拟交易'})).data.code,'HALTED');
+});
