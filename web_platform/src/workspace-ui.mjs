@@ -49,7 +49,7 @@ export function createWorkspaceUI(api,access,go){
     add(market,r?(name||r.strategy_id):'组合策略 · 当前无运行',!!r?.enabled,r?.reason,r?.budget,{CN:'CNY',US:'USD',HK:'HKD'}[market],r?.updated_at,'portfolio',r?'暂停只停止自动执行；进入详情可卖出策略股票，或结束策略并保留股票。':'这不代表没有执行过策略；下方保留历史运行记录。可到“选策略”开始新模拟。',r?.strategy_id||catalog.find(e=>e.market===market&&e.recommended)?.id||catalog.find(e=>e.market===market)?.id,r);
    }else root.append(el('p','组合策略状态读取失败：'+results[0].reason.message,'notice error'));
    const us=value(1),hk=value(2);
-   if(us)add('US',us.state.config?.name||'单标的策略（进阶）',!!us.state.enabled,us.state.reason,us.state.budget,'USD',us.state.last_check_at,'automation','后台心跳：'+when(us.state.heartbeat_at),undefined,us.state);
+   if(us)add('US',us.state.config?.name||'单标的策略（进阶）',!!us.state.enabled,us.state.reason,us.state.budget,'USD',us.state.last_check_at,us.state.config?.type==='enhanced_reversion'?'portfolio':'automation','后台心跳：'+when(us.state.heartbeat_at),us.state.config?.type==='enhanced_reversion'?'US:own-enhanced':undefined,us.state);
    else root.append(el('p','美股单标的状态读取失败：'+results[1].reason.message,'notice error'));
    if(hk)add('HK','定期买入（进阶）',!!hk.automation.enabled,hk.automation.reason,hk.automation.config?.budget,'HKD',hk.automation.last_at,'longbridge','后台心跳：'+when(hk.automation.heartbeat_at),undefined,hk.automation);
    else root.append(el('p','港股定投状态读取失败：'+results[2].reason.message,'notice error'));

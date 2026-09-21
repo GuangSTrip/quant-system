@@ -26,7 +26,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const cnTerminal=[...terminal,'done_for_day'];
   const types = {limit:'限价',market:'市价',stop:'止损市价',stop_limit:'止损限价'};
-  const symbolNames={SPY:'标普 500 ETF',QQQ:'纳斯达克 100 ETF',IWM:'美国小盘股 ETF',EFA:'发达市场 ETF',EEM:'新兴市场 ETF',TLT:'长期美债 ETF',IEF:'中期美债 ETF',GLD:'黄金 ETF',DBC:'商品 ETF',SHY:'短期美债 ETF',AAPL:'苹果公司',MSFT:'微软公司'};
+  const symbolNames={SPY:'标普 500 ETF',QQQ:'纳斯达克 100 ETF',IWM:'美国小盘股 ETF',EFA:'发达市场 ETF',EEM:'新兴市场 ETF',TLT:'长期美债 ETF',IEF:'中期美债 ETF',GLD:'黄金 ETF',DBC:'商品 ETF',SHY:'短期美债 ETF',AAPL:'苹果公司',MSFT:'微软公司',TSLA:'特斯拉',META:'Meta',NVDA:'英伟达',AMZN:'亚马逊',GOOGL:'谷歌'};
   const minuteSymbols=new Set(['SPY','QQQ','AAPL','MSFT']);
   const money = v => v!==null&&v!==undefined&&Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}) : '—';
   const cny = v => v!==null&&v!==undefined&&Number.isFinite(Number(v)) ? Number(v).toLocaleString('zh-CN',{style:'currency',currency:'CNY',maximumFractionDigits:2}) : '—';
@@ -438,7 +438,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
     createStrategyLab({api,chart,onSaved:async()=>{await loadResearch();},onAuto:async id=>{await autoReports();$('auto-report').value=id;showView('automation');}});
     await loadCenterCatalog();syncAccess();updateOrderFields();showView(location.hash.slice(1));
     try{const pending=JSON.parse(sessionStorage.getItem('quant.pending.v1')||'null');if(pending?.client_id&&['orders','plans/submit','acceptance/submit'].includes(pending.path)&&pending.payload&&pending.order)state.pending=pending;}catch{}renderPending();
-    const symbols=['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT'];for(const id of ['quote-symbol','research-symbol','order-symbol','acceptance-symbol'])$(id).replaceChildren(...symbols.map(s=>{const o=node('option','',s+' · '+symbolNames[s]);o.value=s;return o;}));updateResearchFields();
+    const symbols=['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT','TSLA','META','NVDA','AMZN','GOOGL'];for(const id of ['quote-symbol','research-symbol','order-symbol','acceptance-symbol'])$(id).replaceChildren(...symbols.map(s=>{const o=node('option','',s+' · '+symbolNames[s]);o.value=s;return o;}));updateResearchFields();
     await loadSession();await Promise.allSettled([refresh(),loadEquity(),loadQuote(),loadResearch(),loadShowcase()]);if(location.hash==='#audit'&&state.session?.operator)loadAudit();setInterval(()=>{if(!document.hidden)refresh();},15000);
     setInterval(()=>{if(!document.hidden&&location.hash==='#acceptance'&&state.session?.operator&&state.acceptance?.latest?.receipts.fill&&!state.acceptance.latest.complete)inspectAcceptance();},30000);
   }

@@ -1,8 +1,9 @@
 import {minuteRule} from './minute-rules.mjs';
+import {backtestEnhanced} from './intraday-kernel.mjs';
 export const ENGINE_VERSION = 'course-intraday-2.0.0';
-export const SYMBOLS = ['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT'];
-export const INTRADAY_TYPES = ['opening_range_breakout','vwap_reversion','adaptive_momentum'];
-export const INTRADAY_SYMBOLS = ['SPY','QQQ','AAPL','MSFT'];
+export const SYMBOLS = ['SPY','QQQ','IWM','EFA','EEM','TLT','IEF','GLD','DBC','SHY','AAPL','MSFT','TSLA','META','NVDA','AMZN','GOOGL'];
+export const INTRADAY_TYPES = ['opening_range_breakout','vwap_reversion','adaptive_momentum','enhanced_reversion'];
+export const INTRADAY_SYMBOLS = ['SPY','QQQ','AAPL','MSFT','TSLA','META','NVDA','AMZN','GOOGL'];
 export const isIntraday = type => INTRADAY_TYPES.includes(type);
 export class AppError extends Error {
   constructor(message,status=400,code='INVALID_REQUEST'){super(message);this.status=status;this.code=code;}
@@ -14,8 +15,14 @@ export function numeric(value,name,min,max){const n=Number(value);requireValue(v
 export function symbol(value){const v=String(value||'').toUpperCase();requireValue(SYMBOLS.includes(v),'请选择课程允许的股票或 ETF');return v;}
 export function strategyConfig(input={}){
   if(isIntraday(input.type)){
-    const c={name:String(input.name||'分钟策略').trim().slice(0,60),symbol:symbol(input.symbol),type:String(input.type),days:numeric(input.days??5,'历史天数',2,30),budget:numeric(input.budget??1000,'策略预算',100,100000),opening_minutes:numeric(input.opening_minutes??15,'开盘观察分钟',5,60),threshold_bps:numeric(input.threshold_bps??20,'触发阈值基点',0,200),cost_bps:numeric(input.cost_bps??10,'单边成本基点',0,100),lookback:numeric(input.lookback??20,'动量回看分钟',5,120),volume_multiplier:numeric(input.volume_multiplier??1.2,'成交量倍数',.1,10),volatility_multiplier:numeric(input.volatility_multiplier??2,'波动阈值倍数',.1,10)};
-    requireValue(INTRADAY_SYMBOLS.includes(c.symbol),'分钟策略仅允许 SPY、QQQ、AAPL、MSFT；请先固定可交易范围');
+    const c={name:String(input.name||'分钟策略').trim().slice(0,60),symbol:symbol(input.symbol),type:String(input.type),days:numeric(input.days??5,'历史天数',2,30),budget:numeric(input.budget??1000,'策略预算',100,100000),opening_minutes:numeric(input.opening_minutes??15,'开盘观察分钟',5,60),threshold_bps:numeric(input.threshold_bps??(input.type==='enhanced_reversion'?60:20),'触发阈值基点',0,200),cost_bps:numeric(input.cost_bps??10,'单边成本基点',0,100),lookback:numeric(input.lookback??20,'动量回看分钟',5,120),volume_multiplier:numeric(input.volume_multiplier??1.2,'成交量倍数',.1,10),volatility_multiplier:numeric(input.volatility_multiplier??2,'波动阈值倍数',.1,10)};
+    if(c.type==='enhanced_reversion'){
+      c.time_stop_bars=numeric(input.time_stop_bars??60,'时间止损分钟',5,390);
+      c.guard_sigma=numeric(input.guard_sigma??1.5,'自由落体护栏倍数',.1,10);
+      c.max_entries_per_day=numeric(input.max_entries_per_day??1,'每日入场次数',1,5);
+      requireValue(Number.isInteger(c.time_stop_bars)&&Number.isInteger(c.max_entries_per_day),'时间止损与每日入场次数须为整数');
+    }
+    requireValue(INTRADAY_SYMBOLS.includes(c.symbol),'分钟策略仅允许 SPY、QQQ、AAPL、MSFT、TSLA、META、NVDA、AMZN、GOOGL；请先固定可交易范围');
     requireValue(Number.isInteger(c.days)&&Number.isInteger(c.budget)&&Number.isInteger(c.opening_minutes)&&Number.isInteger(c.lookback),'天数、预算和开盘观察分钟须为整数');return c;
   }
   const c={name:String(input.name||'课程策略').trim().slice(0,60),symbol:symbol(input.symbol),type:String(input.type||'sma'),fast:numeric(input.fast??10,'快周期',2,100),slow:numeric(input.slow??30,'慢周期',5,200),allocation:numeric(input.allocation??0.1,'目标仓位',0.01,0.5),days:numeric(input.days??365,'历史天数',90,1095),cost_bps:numeric(input.cost_bps??10,'单边成本基点',0,100)};
@@ -75,7 +82,7 @@ function backtestIntraday(raw,c){
   return {engine:ENGINE_VERSION,config:c,signal:decision.signal??0,signal_reason:decision.reason,signal_value:decision.value,signal_timestamp:bars.at(-1).t,metrics:{total_return:cash/100000-1,benchmark_return:benchCash/100000-1,benchmark_cost:benchCost,cagr:elapsed>0?(cash/100000)**(365.25/elapsed)-1:0,sharpe:sd?mean/sd*Math.sqrt(252):0,max_drawdown:Math.min(...curve.map(x=>x.drawdown)),volatility:sd*Math.sqrt(252),var95,cvar95:tail.reduce((s,x)=>s+x,0)/tail.length,turnover:turnover/100000,total_cost:costTotal,trade_count:trades.length},curve,trades,decisions,quality:{rows:bars.length,from:bars[0].t,to:bars.at(-1).t,duplicates:0,invalid:0},limitations:['分钟历史行情、只做多；收盘前平仓，未模拟股息、税费、冲击和部分成交。','前一根完整分钟线产生信号，下一根开盘价模拟成交；数据中每日最后一根按收盘价强制平仓。','蓝线是同预算、首根开盘买入和末根收盘卖出的日内基准，按同样单边成本计算；它不是跨夜持有。','100,000 美元初始账户中仅使用策略预算。样本少时年化指标仅供演示。']};
 }
 export function backtest(raw,input){
-  const c=strategyConfig(input);if(isIntraday(c.type))return backtestIntraday(raw,c);
+  const c=strategyConfig(input);if(c.type==='enhanced_reversion')return backtestEnhanced(raw,c);if(isIntraday(c.type))return backtestIntraday(raw,c);
   const bars=validateBars(raw),warmup=c.type==='buy_hold'?1:c.slow;
   requireValue(bars.length>warmup+20,'历史数据不足：需要慢周期之外至少 20 根完整日线',422,'INSUFFICIENT_DATA');
   let cash=100000,qty=0,peak=cash,priorEquity=cash,priorSignal=0,totalCost=0,turnover=0;

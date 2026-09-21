@@ -9,7 +9,7 @@ export function createExplanationUI(root,api,access,budget,onReadiness=()=>{},la
  const rules=document.createElement('div'),signal=document.createElement('div'),preview=document.createElement('div'),feedback=el('p','');
  const refresh=el('button','读取账户，更新股数预览');refresh.type='button';
  const budgetRow=document.createElement('div');budgetRow.className='form-row';budgetRow.append(budget.closest('label'),refresh);
- rulesRoot.append(el('h3','这套策略怎么买卖'),rules);
+ const rulesHeading=el('h3','这套策略怎么买卖');rulesHeading.className='daily-strategy-rules';rules.className='daily-strategy-rules';rulesRoot.append(rulesHeading,rules);
  root.append(el('h2','③ 查看最新选股'),el('p','这是策略按最新数据选出的目标股票。沿用同一套规则，历史回测与后续模拟交易才有可比性；股票由策略决定，不必自行挑选。'),signal);
  const planning=document.createElement('div');planning.append(budgetRow,feedback,preview);
  launch.querySelector('h2').after(planning);

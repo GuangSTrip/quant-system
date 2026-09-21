@@ -1,3 +1,5 @@
+import {ownResearch,ownDataset,ownRuns} from './own-strategy.mjs';
+import {inferAsOf,selectUniverse,U_MIN_HISTORY_DAYS,U_MAX_HISTORY_DAYS,U_DEFAULT_HISTORY_DAYS} from './universe-kernel.mjs';
 import {rankedCatalog} from './portfolio-ranking.mjs';
 import {cnPortfolioAdapter,cnExclusive} from './myquant-portfolio.mjs';
 import {replayDetails} from './portfolio-replay.mjs';
@@ -238,7 +240,8 @@ async function runBacktest(env,db,user,input){
   const c=strategyConfig(input.config),saved=input.snapshot_id?await artifact(db,input.snapshot_id,'dataset'):null;
   requireValue(!saved||saved.payload.query.symbols===c.symbol,'快照标的与策略不一致');
   requireValue(!saved||saved.payload.query.timeframe===(isIntraday(c.type)?'1Min':'1Day'),'快照频率与策略不一致');
-  const data=saved?.payload||await history(env,c),snapshotId=saved?.id||'data_'+(await digest({query:data.query,bars:data.bars})).slice(0,40);
+  requireValue(!input.research_sample||c.type==='enhanced_reversion','固定自研样本仅用于本组策略');
+  const data=saved?.payload||(input.research_sample?ownDataset(c.symbol):await history(env,c)),snapshotId=saved?.id||'data_'+(await digest({query:data.query,bars:data.bars})).slice(0,40);
   const result=backtest(data.bars,c),strategyId='strategy_'+(await digest({engine:ENGINE_VERSION,config:c})).slice(0,40);
   await saveArtifact(db,user,'dataset',c.symbol+' '+data.query.start.slice(0,10),data,snapshotId);
   await saveArtifact(db,user,'strategy',c.name,{config:c,engine:ENGINE_VERSION},strategyId);
@@ -348,6 +351,8 @@ async function route(request,env){
     if(path==='/api/v1/portfolio/explanation')return json(await portfolio.explanation(db,url.searchParams.get('id')));
     if(path==='/api/v1/portfolio/preview'){await operator(request,env,db);return json(await portfolio.preview(env,db,url.searchParams.get('id'),Number(url.searchParams.get('budget'))));}
     if(path==='/api/v1/portfolio/report'){const e=portfolioCatalog.get(url.searchParams.get('id'));requireValue(e,'策略不存在',404);if(url.searchParams.get('source')==='latest'){const r=await first(db,"SELECT payload FROM artifacts WHERE kind='portfolio_backtest' AND name=? ORDER BY created_at DESC LIMIT 1",e.id);requireValue(r,'尚未导入该策略的重放回测',404);return json({ok:true,...e,...JSON.parse(r.payload)});}return json({ok:true,...e});}
+    if(path==='/api/v1/own/research')return json(ownResearch());
+    if(path==='/api/v1/own/runs'){await operator(request,env,db);const current=await auto.status(db,env);return json(await ownRuns(db,current.state));}
     if(path==='/api/v1/portfolio'){await operator(request,env,db);return json(await portfolio.state(db,env));}
     if(path==='/api/v1/longbridge/trading'){await operator(request,env,db);return json(await tradingState(env,db));}
     if(path==='/api/v1/longbridge/status'){await operator(request,env,db);return json(await connectionStatus(env,db));}
@@ -450,6 +455,38 @@ async function route(request,env){
     return json({ok:true,control:publicControl(await control(db))});
   }
   if(path==='/api/v1/backtests')return json(await runBacktest(env,db,user,input));
+  if(path==='/api/v1/universe/select'){
+    const n=numeric(input.history_days??U_DEFAULT_HISTORY_DAYS,'历史交易日数',U_MIN_HISTORY_DAYS,U_MAX_HISTORY_DAYS);
+    requireValue(Number.isInteger(n),'历史交易日数须为整数');
+    const clock=await broker(env,'/v2/clock');
+    const dayEnd=new Date(String(clock.timestamp).slice(0,10)+'T00:00:00Z');
+    const minuteEnd=new Date(Math.floor((Date.parse(clock.timestamp)-60000)/60000)*60000);
+    async function fetchBars(timeframe,start,end,adjustment){
+      const out={},base=new URLSearchParams({symbols:INTRADAY_SYMBOLS.join(','),timeframe,start:start.toISOString(),end:end.toISOString(),feed:'iex',adjustment,limit:'10000',sort:'asc'});
+      let pageToken=null,pages=0;const seen=new Set();
+      do{
+        const q=new URLSearchParams(base);if(pageToken)q.set('page_token',pageToken);
+        const page=await broker(env,'/v2/stocks/bars?'+q,{data:true});
+        for(const [sym,bars] of Object.entries(page.bars||{}))(out[sym]??=[]).push(...bars);
+        pageToken=page.next_page_token||null;pages++;
+        requireValue(!pageToken||(!seen.has(pageToken)&&pages<16),'选股数据分页过多，请缩短区间',422,'DATA_LIMIT');
+      if(pageToken)seen.add(pageToken);
+      }while(pageToken);
+      return out;
+    }
+    const dailyRaw=await fetchBars('1Day',new Date(dayEnd.getTime()-130*86400000),new Date(dayEnd.getTime()-1),'raw');
+    const minuteRaw=await fetchBars('1Min',new Date(minuteEnd.getTime()-Math.min(35,Math.ceil(n*7/5)+7)*86400000),minuteEnd,'raw');
+    const dailyBy={},minuteBy={};
+    for(const symbol of INTRADAY_SYMBOLS){
+      dailyBy[symbol]=(dailyRaw[symbol]||[]).map(b=>({t:String(b.t).slice(0,10),c:Number(b.c),v:Number(b.v)}));
+      minuteBy[symbol]=(minuteRaw[symbol]||[]).map(b=>({t:b.t,o:Number(b.o),h:Number(b.h),l:Number(b.l),c:Number(b.c),v:Number(b.v)}));
+    }
+    const asOf=inferAsOf(Object.values(dailyBy).flat().map(r=>r.t),Date.parse(clock.timestamp));
+    requireValue(asOf,'没有已完成的交易日可用于选股',422,'INSUFFICIENT_DATA');
+    const report=selectUniverse(INTRADAY_SYMBOLS,dailyBy,minuteBy,asOf,n);
+    await audit(db,user.id,'universe_selected',null,{as_of:asOf,history_days:n,funnel:report.funnel});
+    return json({ok:true,...report,source:'Alpaca IEX 最新已完成交易日；成交额仅代表此行情源，不能与全市场口径直接比较'});
+  }
   if(path==='/api/v1/plans')return json(await buildPlan(env,db,user,input));
   if(path==='/api/v1/plans/submit'){
     const plan=(await artifact(db,input.plan_id,'plan')).payload;requireValue(plan.order&&plan.order.qty>=1,'计划没有可提交订单',409);

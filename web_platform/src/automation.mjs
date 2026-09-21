@@ -1,5 +1,6 @@
 import {portfolioGuard} from './portfolio.mjs';
-import {requireValue,nowISO,numeric,strategyConfig,validateBars,signalAt,isIntraday,intradayDecision,normalizeOrder,digest,ENGINE_VERSION} from './engine.mjs';
+import {enhancedDecision,enhancedSession} from './intraday-kernel.mjs';
+import {requireValue,nowISO,numeric,strategyConfig,validateBars,signalAt,isIntraday,intradayDecision,marketMinute,normalizeOrder,digest,ENGINE_VERSION} from './engine.mjs';
 const get=(db,sql,...v)=>db.prepare(sql).bind(...v).first();
 const rows=async(db,sql,...v)=>(await db.prepare(sql).bind(...v).all()).results;
 const run=(db,sql,...v)=>db.prepare(sql).bind(...v).run();
@@ -8,6 +9,19 @@ export async function autoGuard(db,order,automation){
   const state=await autoState(db);
   if(automation)requireValue(state.enabled&&state.run_id===automation.run_id&&state.revision===automation.revision,'策略已暂停或版本已变化',409,'STRATEGY_STOPPED');
   else requireValue(!state.enabled||JSON.parse(state.config).symbol!==order.symbol,'该标的正由自动策略管理，请先暂停策略再手动交易',409,'STRATEGY_OWNS_SYMBOL');
+}
+export async function enhancedLedgerState(db,actor,bars,owned){
+  const day=marketMinute(bars.at(-1).t).day;
+  const records=await rows(db,'SELECT broker_data FROM orders WHERE actor=?',actor);
+  let entriesToday=0,entryTime=null,lastBuy=null;
+  for(const r of records){const b=r.broker_data?JSON.parse(r.broker_data):null;
+    if(b?.side!=='buy'||!(Number(b.filled_qty)>0))continue;
+    const at=b.filled_at||b.updated_at;if(!at||!Number.isFinite(Date.parse(at)))continue;
+    if(marketMinute(at).day===day)entriesToday++;
+    if(!lastBuy||Date.parse(at)>Date.parse(lastBuy))lastBuy=at;
+  }
+  if(lastBuy&&marketMinute(lastBuy).day===day){for(const b of bars){if(Date.parse(b.t)<=Date.parse(lastBuy))entryTime=b.t;else break;}}
+  return {qty:owned,entriesToday,entryTime,overnight:owned>0&&(!lastBuy||marketMinute(lastBuy).day!==day)};
 }
 export function createAutomation(services){
   const {accountContext,history,snapshotQuote,requireCourseAsset,submitOrder,reconcile,audit,artifact,control,cancelOrders}=services;
@@ -22,6 +36,7 @@ export function createAutomation(services){
       const c=await control(db);requireValue(!c.halted,'请先在风控页对账并恢复模拟交易',409,'HALTED');
       const report=await artifact(db,input.backtest_id,'backtest'),config=strategyConfig(report.payload.config);
       requireValue(report.payload.engine===ENGINE_VERSION||report.payload.engine==='course-intraday-1.1.0'||(!isIntraday(config.type)&&report.payload.engine==='course-daily-1.0.0'),'回测版本已变化，请重新回测');
+      if(config.type==='enhanced_reversion')requireValue(report.payload.kernel_revision==='own-enhanced-1','自研策略规则已更新，请在选策略页重新回测');
       const budget=numeric(input.budget,'策略预算',100,Number.MAX_SAFE_INTEGER/100);
       if(isIntraday(config.type))requireValue(budget===config.budget,'分钟策略预算必须与回测报告一致：'+config.budget+' USD',409,'BUDGET_MISMATCH');
       requireValue(budget<=c.max_order,'策略预算超过当前单笔限额 '+c.max_order+' USD；请在风控与对账中调整并保存限额',409,'STRATEGY_BUDGET_LIMIT');
@@ -73,7 +88,19 @@ export function createAutomation(services){
       requireValue(age>=0&&age<=7*86400000,'信号日线已过期',409,'STALE_SIGNAL');
       const id=s.run_id+':'+bar.t,existing=await get(db,'SELECT * FROM auto_decisions WHERE id=?',id);
       if(existing)return record(db,s,source,'already_evaluated',{message:minute?'当前完整分钟线已处理，本轮不重复下单':'当前完整日线已处理，本轮不重复下单',decision_id:id});
-      const decision=minute?intradayDecision(bars,bars.length-1,config):null,signal=minute?(decision.signal??(owned>0?1:0)):signalAt(bars,bars.length-1,config),quote=await snapshotQuote(env,config.symbol);
+      let decision,signal;
+      if(minute&&config.type==='enhanced_reversion'){
+        // Stateful kernel: derive entries/entry bar from the order ledger of this run.
+        const state=await enhancedLedgerState(db,user.id,bars,owned);
+        const closing=Date.parse(ctx.clock.next_close)-Date.parse(ctx.clock.timestamp);
+        const d=owned>0&&(state.overnight||(Number.isFinite(closing)&&closing<=15*60000))?{action:'sell',reason:state.overnight?'处理尚未平仓的跨日策略持仓':'券商交易日历：即将收市，申请平仓'}:enhancedDecision(enhancedSession(bars,bars.length-1),state,config);
+        decision={signal:d.action==='buy'?1:d.action==='sell'?0:null,reason:d.reason,value:null};
+        signal=decision.signal??(owned>0?1:0);
+      }else{
+        decision=minute?intradayDecision(bars,bars.length-1,config):null;
+        signal=minute?(decision.signal??(owned>0?1:0)):signalAt(bars,bars.length-1,config);
+      }
+      const quote=await snapshotQuote(env,config.symbol);
       const side=signal?'buy':'sell',price=signal?Number(quote.ap)*1.001:Number(quote.bp)*.999;
       requireValue(price>0&&Number.isFinite(price),'报价不可用',409,'STALE_QUOTE');
       const target=signal?(owned>0?owned:Math.floor(s.budget/price)):0,delta=target-owned;
