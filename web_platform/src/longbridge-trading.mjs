@@ -204,6 +204,6 @@ export const hkPortfolioAdapter={
   for(const o of pending)await inspectHK(env,db,o.client_id);
   const unknown=await first(db,"SELECT client_id FROM lb_orders WHERE status IN ('unknown','submitting','cancel_unknown') LIMIT 1");requireValue(!unknown,'存在未决长桥委托',409,'LB_UNRESOLVED');
  },
- async ledger(db,s){return (await rows(db,'SELECT * FROM lb_orders WHERE run_id=?',s.run_id)).map(o=>{const b=o.broker_data?JSON.parse(o.broker_data):null,p=JSON.parse(o.payload);return {key:o.client_id.replace(/^pf_/,''),symbol:p.symbol,side:p.side==='Buy'?'buy':'sell',filled:Number(b?.executed_quantity||0),price:Number(b?.executed_price||0)};});},
+ async ledger(db,s){return (await rows(db,'SELECT * FROM lb_orders WHERE run_id=?',s.run_id)).map(o=>{const b=o.broker_data?JSON.parse(o.broker_data):null,p=JSON.parse(o.payload);return {key:o.client_id.replace(/^pf_/,''),id:o.client_id,broker_id:o.broker_id,status:o.status,qty:Number(p.quantity),submitted_at:o.created_at,updated_at:o.updated_at,filled_at:b?.executed_at||null,symbol:p.symbol,side:p.side==='Buy'?'buy':'sell',filled:Number(b?.executed_quantity||0),price:Number(b?.executed_price||0)};});},
  async submit(env,db,s,o){return lock(db,()=>submitLocked(env,db,{id:'portfolio:'+s.run_id},{symbol:o.symbol,side:o.side==='buy'?'Buy':'Sell',quantity:o.qty,lot_size:o.lot_size,price:o.price,confirm:true,client_id:'pf_'+o.key.replaceAll('-','')},{run_id:s.run_id,revision:s.revision}));}
 };

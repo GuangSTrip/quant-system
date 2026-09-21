@@ -1,3 +1,4 @@
+import {rankedCatalog} from './portfolio-ranking.mjs';
 import {cnPortfolioAdapter,cnExclusive} from './myquant-portfolio.mjs';
 import {replayDetails} from './portfolio-replay.mjs';
 import {createPortfolio,portfolioGuard} from './portfolio.mjs';
@@ -325,7 +326,7 @@ const portfolio=createPortfolio({catalog:portfolioCatalog,audit,adapters:{
    return {tag:await digest('alpaca:'+env.ALPACA_PAPER_API_KEY),cash:Number(ctx.account.cash),is_open:ctx.clock.is_open,pending:ctx.openOrders.length>0,positions:ctx.positions.map(p=>({symbol:p.symbol,qty:Number(p.qty)})),quotes};
   },
   async reconcile(env,db){requireValue((await reconcile(env,db,{id:'portfolio'})).ok,'账户对账失败',409,'RECONCILIATION_FAILED');},
-  async ledger(db,s){return (await all(db,'SELECT * FROM orders WHERE actor=?','portfolio:'+s.run_id)).map(o=>{const b=o.broker_data?JSON.parse(o.broker_data):null,p=JSON.parse(o.payload);return {key:o.client_id.replace(/^qs_/,''),symbol:p.symbol,side:p.side,filled:Number(b?.filled_qty||0),price:Number(b?.filled_avg_price||0)};});},
+  async ledger(db,s){return (await all(db,'SELECT * FROM orders WHERE actor=?','portfolio:'+s.run_id)).map(o=>{const b=o.broker_data?JSON.parse(o.broker_data):null,p=JSON.parse(o.payload);return {key:o.client_id.replace(/^qs_/,''),id:o.client_id,broker_id:o.broker_id,status:o.status,qty:Number(p.qty),submitted_at:o.created_at,updated_at:o.updated_at,filled_at:b?.filled_at||null,symbol:p.symbol,side:p.side,filled:Number(b?.filled_qty||0),price:Number(b?.filled_avg_price||0)};});},
   async submit(env,db,s,o){return submitOrder(env,db,{id:'portfolio:'+s.run_id},{symbol:o.symbol,side:o.side,qty:o.qty,type:'limit',limit_price:o.price,time_in_force:'day',confirm:true,idempotency_key:o.key},null,{portfolio:true,run_id:s.run_id,revision:s.revision});}
  },HK:hkPortfolioAdapter,CN:cnPortfolioAdapter
 }});
@@ -341,7 +342,9 @@ async function route(request,env){
   const db=database(env);
   if(path==='/api/v1/scheduler/tick'){requireValue(method==='POST','Method not allowed',405);const identity=await verifyScheduler(request,env);const result=await scheduledTick(env,db,identity.source);console.info(JSON.stringify({event:'scheduler_tick',source:identity.source,at:nowISO(),ok:result.ok,outcome:result.outcome}));return json(result);}
   if(method==='GET'){
-    if(path==='/api/v1/portfolio/catalog')return json({ok:true,strategies:[...portfolioCatalog.values()].map(({report,...e})=>e)});
+    if(path==='/api/v1/portfolio/catalog')return json(await rankedCatalog(db,portfolioCatalog,url.searchParams.get('source')==='reference'?'reference':'latest'));
+    if(path==='/api/v1/portfolio/history'){await operator(request,env,db);return json(await portfolio.history.list(db,{offset:url.searchParams.get('offset'),market:url.searchParams.get('market')}));}
+    if(path==='/api/v1/portfolio/history/detail'){await operator(request,env,db);return json(await portfolio.history.detail(env,db,url.searchParams.get('id')));}
     if(path==='/api/v1/portfolio/explanation')return json(await portfolio.explanation(db,url.searchParams.get('id')));
     if(path==='/api/v1/portfolio/preview'){await operator(request,env,db);return json(await portfolio.preview(env,db,url.searchParams.get('id'),Number(url.searchParams.get('budget'))));}
     if(path==='/api/v1/portfolio/report'){const e=portfolioCatalog.get(url.searchParams.get('id'));requireValue(e,'策略不存在',404);if(url.searchParams.get('source')==='latest'){const r=await first(db,"SELECT payload FROM artifacts WHERE kind='portfolio_backtest' AND name=? ORDER BY created_at DESC LIMIT 1",e.id);requireValue(r,'尚未导入该策略的重放回测',404);return json({ok:true,...e,...JSON.parse(r.payload)});}return json({ok:true,...e});}
@@ -384,7 +387,7 @@ async function route(request,env){
    requireValue(['selection','timing','allocation','risk_policy'].every(k=>(input.config?.[k]||null)===(e.config[k]||null)),'回测配置与注册策略不一致');
    requireValue(Array.isArray(dates)&&dates.length>1&&dates.length<=10000&&dates.every((d,i)=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&(!i||d>dates[i-1])),'回测日期无效');
    requireValue(r&&Array.isArray(r.equity)&&r.equity.length===dates.length&&r.equity.every(n=>typeof n==='number'&&Number.isFinite(n)&&n>0)&&['cagr_pct','max_drawdown_pct','total_return_pct'].every(k=>typeof r.full?.[k]==='number'&&Number.isFinite(r.full[k])),'回测曲线或指标无效');
-   const payload={report:{equity:r.equity,dates,full:r.full,...replayDetails(r,dates)},source:'导入的同规则重放回测 · 数据摘要 '+String(input.signal.data_digest).slice(0,16)+' · '+String(input.note||'').slice(0,300)};
+   const payload={comparison:JSON.stringify([input.signal.origin,Object.keys(input.signal.liquidity_caps||{}).sort(),String(input.note||'').slice(0,300),[...new Set((r.trades||[]).map(t=>Number((t.cost/(t.qty*t.price)).toFixed(6))))].sort()]),report:{equity:r.equity,dates,full:r.full,...replayDetails(r,dates)},source:'导入的同规则重放回测 · 数据摘要 '+String(input.signal.data_digest).slice(0,16)+' · '+String(input.note||'').slice(0,300)};
    return json({ok:true,id:await saveArtifact(db,user,'portfolio_backtest',e.id,payload)});
   }
   if(path==='/api/v1/portfolio/signals')return json(await portfolio.ingest(db,user,input));

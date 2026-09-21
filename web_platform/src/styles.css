@@ -51,3 +51,5 @@ body[data-broker-view="all"] [data-alpaca-only],body[data-broker-view="all"] [da
 body[data-current-view="portfolio"] label:has(#pf-strategy){display:flex!important;flex-direction:column}
 .workspace-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.workspace-grid .panel{min-width:0}.workspace-grid button{margin:8px 6px 0 0}.workspace-grid .detail-list strong{overflow-wrap:anywhere}.run-card h2{line-height:1.6}.sidebar .nav{width:100%;text-align:left}.sidebar details{margin-top:12px}
 @media(max-width:1100px){.workspace-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.workspace-grid{grid-template-columns:1fr}.workspace-intro{flex-wrap:wrap}}
+
+.strategy-ranking{max-height:420px;overflow:auto}.strategy-ranking th{position:sticky;top:0;background:#f8f7ef;z-index:1}.run-history-toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end}.run-history-detail{margin-top:20px}.run-history-detail table{min-width:700px}.run-history-detail h3{margin-top:24px}

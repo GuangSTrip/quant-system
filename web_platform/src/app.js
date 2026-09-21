@@ -1,3 +1,4 @@
+import {createRunHistoryUI} from './portfolio-history-ui.mjs';
 import {cnSymbol,cnName} from './cn-symbol.mjs';
 import {createAccountReader} from './account-reader.mjs';
 import {runReason} from './run-labels.mjs';
@@ -20,7 +21,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   const cnAuditPanel=$('cn-audit-list').closest('article');$('view-audit').append(cnAuditPanel);
   const dailyWorkbench=createDailyWorkbench($('daily-workbench'),chart);
   const state = {session:null,overview:null,quote:null,report:null,plan:null,audit:[],orders:[],pending:null,confirmation:null,refreshing:false,riskDirty:false,chartMode:'equity',acceptance:null,checkingAcceptance:false,cn:null,cnPending:null};
-  const names = {runs:'运行中的策略',safety:'交易安全',tools:'辅助工具','us-account':'美股资产与行情',replay:'历史策略回放','cn-trade':'A 股模拟交易',portfolio:'选策略 · 开始模拟',longbridge:'港股 · 长桥',showcase:'研究概览',library:'分钟策略库',daily:'日线策略研究',overview:'账户首页',strategy:'策略讲解',research:'创建回测',trade:'美股模拟交易',risk:'美股交易安全',audit:'操作记录',acceptance:'美股验收工具',automation:'美股单标的策略（进阶）'};
+  const names = {runs:'策略运行与记录',safety:'交易安全',tools:'辅助工具','us-account':'美股资产与行情',replay:'历史策略回放','cn-trade':'A 股模拟交易',portfolio:'选策略 · 开始模拟',longbridge:'港股 · 长桥',showcase:'研究概览',library:'分钟策略库',daily:'日线策略研究',overview:'账户首页',strategy:'策略讲解',research:'创建回测',trade:'美股模拟交易',risk:'美股交易安全',audit:'操作记录',acceptance:'美股验收工具',automation:'美股单标的策略（进阶）'};
   const statusNames = {new:'券商已接收',accepted:'已接收待处理',pending_new:'待接收',partially_filled:'部分成交',filled:'全部成交',done_for_day:'当日结束',canceled:'已撤销',expired:'已过期',rejected:'已拒绝',pending_cancel:'撤单待确认',pending_replace:'修改待确认',replaced:'已替换',stopped:'已停止',suspended:'已挂起',calculated:'结算处理中',submitting:'提交待确认',unknown:'状态未知'};
   const terminal = ['filled','canceled','expired','rejected','replaced'];
   const cnTerminal=[...terminal,'done_for_day'];
@@ -47,6 +48,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
     let data;try{data=await response.json();}catch{throw new Error('服务器返回了无法识别的结果，请刷新后查看订单状态。');}
     if(!response.ok){if(response.status===401&&path!=='session'&&path!=='auth/login')await loadSession();const e=new Error(data.error||'请求失败');e.code=data.code;e.status=response.status;throw e;}return data;
   }
+  const runHistory=createRunHistoryUI($('run-history'),api,()=>Boolean(state.session?.operator),chart);
   const workspace=createWorkspaceUI(api,()=>Boolean(state.session?.operator),(view,selection,focus)=>{showView(view,!!selection,focus);if(selection)portfolioUI.load(selection);});
   const longbridgePanel=createLongbridgePanel(api);
   const hkTrading=createHKTradingUI(api);
@@ -87,7 +89,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   function showView(view,fromCenter=false,focus=null){
     if(!view)view='overview';if(view==='hk')view='longbridge';
     if(view==='strategies'){if(centerChoice.includes(':')){centerChoice='daily-lab';centerFrequency='daily';centerOptions();}openCenter();return;}
-    if(['overview','runs'].includes(view))workspace.load(view);
+    if(['overview','runs'].includes(view))workspace.load(view);if(view==='runs')runHistory.load();
     const inCenter=strategyViews.has(view);$('strategy-center').hidden=!inCenter;
     if(inCenter&&!fromCenter){
       if(view==='replay'){centerFrequency='daily';if(!['sma','momentum','buy_hold'].includes(centerChoice))centerChoice='sma';loadClassroom();}
@@ -122,8 +124,8 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   async function loadSession(){
     try{state.session=await api('session');text('identity-label',state.session.operator?state.session.username+' · 操作员已登录':'公开访客 · 查看权限');$('sign-in').hidden=state.session.signed_in;$('sign-out').hidden=!state.session.signed_in;$('operator-notice').hidden=state.session.operator;}
     catch(e){state.session=null;text('identity-label','身份服务暂不可用');message('global-error',e.message,true);$('operator-notice').hidden=false;}
-    if(!state.session?.operator){longbridgePanel.clear();hkTrading.clear();portfolioUI.clear();clearCn();}else if(location.hash==='#longbridge'){longbridgePanel.status();hkTrading.status();}else if(location.hash==='#cn-trade'){loadCn();}else if(location.hash==='#portfolio'){portfolioUI.load();}
-    syncAccess();
+    if(!state.session?.operator){longbridgePanel.clear();hkTrading.clear();portfolioUI.clear();runHistory.clear();clearCn();}else if(location.hash==='#longbridge'){longbridgePanel.status();hkTrading.status();}else if(location.hash==='#cn-trade'){loadCn();}else if(location.hash==='#portfolio'){portfolioUI.load();}
+    syncAccess();if(location.hash==='#runs')runHistory.load();
     if(['#overview','#runs'].includes(location.hash))workspace.load(location.hash.slice(1));else if(!state.session?.operator)workspace.clear();
   }
   const pick=(value,...keys)=>{for(const key of keys){const candidate=value?.[key];if(candidate!==undefined&&candidate!==null&&candidate!=='')return candidate;}return null;};

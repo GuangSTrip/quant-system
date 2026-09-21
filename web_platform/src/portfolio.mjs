@@ -1,3 +1,4 @@
+import {createRunHistory,historyStatement,recordRunMark,runPerformance} from './portfolio-history.mjs';
 import {requireValue,nowISO,numeric,digest} from './engine.mjs';
 import {MARKETS,validateSignal,deltaOrders,instrumentSymbol} from './portfolio-contract.mjs';
 import {positionMap,ownedPositions,checkOwnership} from './portfolio-ownership.mjs';
@@ -50,23 +51,26 @@ export function createPortfolio({catalog,adapters,audit}){
   const e=entry(input.strategy_id),a=adapter(e.market),budget=numeric(input.budget,'组合预算',100,100000000);
   requireValue(env.SCHEDULER_LOCAL_ENABLED==='true'||env.SCHEDULER_NATIVE==='true'||env.SCHEDULER_REPOSITORY_ID,'后台调度尚未配置',503,'NO_SCHEDULER');
   requireValue(!await get(db,'SELECT market FROM portfolio_runs WHERE market=?',e.market),'该市场已有组合，请恢复原运行或平仓释放后更换',409,'PORTFOLIO_EXISTS');
-  await latest(db,e);
+  const initialSignal=await latest(db,e);
+  let startedRun;
   // Reuse the broker's order lock so legacy starts/manual submissions cannot race creation.
   await a.exclusive(db,async()=>{
    await a.available(env,db);const ctx=await a.snapshot(env,db,[]);
    const ownership={positions:positionMap(ctx.positions),awaiting_orders:!!ctx.pending};
    requireValue(ctx.cash>=budget,'账户可用本币现金不足',409,'CASH_LIMIT');
-   const runId=crypto.randomUUID(),at=nowISO();
+   const runId=crypto.randomUUID(),at=nowISO();startedRun=runId;
    await db.batch([
     db.prepare('INSERT INTO portfolio_runs(market,run_id,strategy_id,version,connection_tag,budget,enabled,reason,updated_at) VALUES(?,?,?,?,?,?,1,?,?)').bind(e.market,runId,e.id,e.version,ctx.tag,budget,ctx.pending?'waiting_existing_orders':'等待后台执行',at),
-    db.prepare('INSERT INTO artifacts(id,kind,name,payload,actor,created_at) VALUES(?,?,?,?,?,?)').bind('ownership:'+runId,'portfolio_ownership',runId,JSON.stringify(ownership),user.id,at)
+    db.prepare('INSERT INTO artifacts(id,kind,name,payload,actor,created_at) VALUES(?,?,?,?,?,?)').bind('ownership:'+runId,'portfolio_ownership',runId,JSON.stringify(ownership),user.id,at),
+    historyStatement(db,{run_id:runId,strategy_id:e.id,market:e.market,currency:e.currency,name:e.name,config:e.config,version:e.version,budget,started_at:at,status:'running',initial_signal:initialSignal.signal},user.id)
    ]);
   });
-  await audit(db,user.id,'portfolio_started',e.id,{budget,market:e.market});return state(db,env);
+  await audit(db,user.id,'portfolio_started',startedRun,{budget,market:e.market,strategy_id:e.id});return state(db,env);
  }
  async function pause(db,user,market,reason='操作员暂停；委托仍需核对，管理权保留',env){
+  const previous=await get(db,'SELECT run_id FROM portfolio_runs WHERE market=?',market);
   await run(db,'UPDATE portfolio_runs SET enabled=0,revision=revision+1,reason=?,updated_at=? WHERE market=?',reason,nowISO(),market);
-  await audit(db,user.id,'portfolio_paused',market,{reason});return state(db,env);
+  await audit(db,user.id,'portfolio_paused',previous?.run_id||market,{reason,market});return state(db,env);
  }
  async function resume(env,db,user,input){
   requireValue(input.confirm==='启动组合自动模拟交易','请输入“启动组合自动模拟交易”');
@@ -85,7 +89,12 @@ export function createPortfolio({catalog,adapters,audit}){
   if(keep)requireValue(input.confirm==='结束策略并保留持仓','请确认结束策略并将现有股票转为手动管理',400,'KEEP_POSITIONS_CONFIRM');
   requireValue((keep||!Object.keys(owned).length)&&(!ledger.length||!ctx.pending),'结束前需核对完策略委托；有股票时可选择“结束策略，保留股票”',409,'NEEDS_FLAT');
   if(!base.awaiting_orders)checkOwnership(ctx,base.positions,owned);
-  const result=await run(db,'DELETE FROM portfolio_runs WHERE market=? AND run_id=? AND revision=? AND enabled=0 AND lease_id IS NULL',s.market,s.run_id,s.revision);requireValue(result.meta.changes===1,'策略状态已变化，请刷新后重试',409,'PORTFOLIO_CHANGED');await audit(db,user.id,'portfolio_released',s.run_id,{kept_positions:keep?owned:{},ownership_transfer:keep?'manual':'none'});return state(db,env);
+  const saved=await get(db,"SELECT payload FROM artifacts WHERE id=? AND kind='portfolio_run_history'",'run-history:'+s.run_id);
+  const at=nowISO(),e=entry(s.strategy_id),record={...(saved?JSON.parse(saved.payload):{run_id:s.run_id,strategy_id:s.strategy_id,market:s.market,currency:e.currency,name:e.name,config:e.config,budget:s.budget,started_at:null,legacy:true}),status:keep?'ended_kept':'ended',ended_at:at,kept_positions:keep?owned:{},orders:ledger,final_metrics:runPerformance(ledger,s.budget,{})};
+  // Insert/update only while the exact paused revision still exists; archive and release are atomic.
+  const archived=db.prepare("INSERT INTO artifacts(id,kind,name,payload,actor,created_at) SELECT ?,'portfolio_run_history',?,?,?,? WHERE EXISTS(SELECT 1 FROM portfolio_runs WHERE market=? AND run_id=? AND revision=? AND enabled=0 AND lease_id IS NULL) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload").bind('run-history:'+s.run_id,s.run_id,JSON.stringify(record),user.id,record.started_at||at,s.market,s.run_id,s.revision);
+  const results=await db.batch([archived,db.prepare('DELETE FROM portfolio_runs WHERE market=? AND run_id=? AND revision=? AND enabled=0 AND lease_id IS NULL').bind(s.market,s.run_id,s.revision)]);
+  requireValue(results[1].meta.changes===1,'策略状态已变化，请刷新后重试',409,'PORTFOLIO_CHANGED');await audit(db,user.id,'portfolio_released',s.run_id,{kept_positions:keep?owned:{},ownership_transfer:keep?'manual':'none'});return state(db,env);
  }
  async function liquidate(env,db,user,input){
   requireValue(input.confirm==='平仓并停止组合','请输入“平仓并停止组合”');
@@ -117,6 +126,8 @@ export function createPortfolio({catalog,adapters,audit}){
    const {signal,id:signalId}=s.exit_requested?{signal:{targets:[],liquidity_caps:Object.fromEntries(Object.keys(owned).map(k=>[k,1e15])),rebalance_date:'liquidation-'+s.exit_requested,execute_after:new Date(0).toISOString(),expires_at:new Date(Date.now()+86400000).toISOString()},id:'operator-liquidation'}:await latest(db,e),symbols=[...new Set([...signal.targets.map(t=>t.symbol),...Object.keys(owned)])];
    const ctx=await a.snapshot(env,db,s.last_decision===s.run_id+':'+signal.rebalance_date?[]:symbols);requireValue(ctx.tag===s.connection_tag,'账户连接已改变',409,'CONNECTION_CHANGED');
    checkOwnership(ctx,base.positions,owned);
+   // Monitoring is observational; a missing mark cannot change execution permissions.
+   try{let markQuotes=ctx.quotes;if(market==='US'&&!Object.keys(markQuotes).length&&Object.keys(owned).length){const last=await get(db,"SELECT created_at FROM artifacts WHERE kind='portfolio_run_mark' AND name=? ORDER BY created_at DESC LIMIT 1",s.run_id);if(!last||Date.now()-Date.parse(last.created_at)>60000)markQuotes=(await a.snapshot(env,db,Object.keys(owned))).quotes;}await recordRunMark(db,s,ledger,markQuotes);}catch{console.warn('portfolio_monitor_unavailable',market);}
    // A-share T+1: never borrow sellable old shares to sell today's strategy buys.
    if(market==='CN')for(const [symbol,q] of Object.entries(ctx.quotes))q.available=Math.max(0,(q.available||0)-(base.positions[symbol]||0));
    if(ctx.pending)return finish('pending_orders');
@@ -178,5 +189,5 @@ export function createPortfolio({catalog,adapters,audit}){
   if(owner)issues.push('该市场已有组合管理账户；此处仅按输入预算演示，不能重复启动或据此直接下单。');
   return {ok:true,strategy_id:id,budget:amount,currency:info.currency,...result,protected_positions:protectedPositions,blockers:[...issues,...result.blockers],fetched_at:nowISO()};
  }
- return {state,ingest,quotes,start,pause,resume,release,liquidate,tick,explanation,preview};
+ return {state,ingest,quotes,start,pause,resume,release,liquidate,tick,explanation,preview,history:createRunHistory({catalog,adapters})};
 }
