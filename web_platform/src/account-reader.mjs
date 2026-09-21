@@ -1,8 +1,13 @@
 // Coalesce account reads across the home page and broker panel, respecting the
 // broker's five-second query interval. Never cache authentication failures.
 export function createAccountReader(request,clock=()=>Date.now()){
- let cached=null,pending=null,epoch=0;
- return {clear(){epoch++;cached=null;pending=null;},async read(path){
+ let cached=null,pending=null,epoch=0;const catalogPending=new Map();
+ return {clear(){epoch++;cached=null;pending=null;catalogPending.clear();},async read(path){
+  if(['portfolio/catalog','portfolio/catalog?source=latest','portfolio/catalog?source=reference'].includes(path)){
+   const key=path==='portfolio/catalog'?'portfolio/catalog?source=latest':path;
+   if(catalogPending.has(key))return catalogPending.get(key);
+   const task=Promise.resolve().then(()=>request(key)).finally(()=>{if(catalogPending.get(key)===task)catalogPending.delete(key);});catalogPending.set(key,task);return task;
+  }
   if(path!=='longbridge/overview')return request(path);
   if(cached&&clock()-cached.at<5500)return cached.data;
   if(pending)return pending;

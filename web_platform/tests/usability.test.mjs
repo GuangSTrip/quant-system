@@ -17,3 +17,10 @@ test('failed refresh retains visibly stale data but never on authentication fail
 test('unstarted, running, paused and completed are distinct and US scope is explicit',()=>{
  assert.equal(runLabel(null),'尚未启动');assert.equal(runLabel({run_id:'1',enabled:true}),'运行中');assert.equal(runLabel({run_id:'1',enabled:false}),'已暂停');assert.equal(runLabel({run_id:'1',outcome:'completed'}),'已结束');assert.equal(runReason('全局交易已暂停'),'美股交易已暂停');
 });
+
+test('concurrent catalog reads coalesce without caching completed rankings or sharing sources',async()=>{
+ const calls=[],reader=createAccountReader(async path=>{calls.push(path);return {revision:calls.length};});
+ const a=await Promise.all([reader.read('portfolio/catalog'),reader.read('portfolio/catalog?source=latest'),reader.read('portfolio/catalog?source=reference')]);
+ assert.equal(calls.length,2);assert.deepEqual(a[0],a[1]);assert.notDeepEqual(a[0],a[2]);
+ assert.equal((await reader.read('portfolio/catalog')).revision,3);
+});

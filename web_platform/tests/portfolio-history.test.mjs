@@ -54,3 +54,11 @@ test('monitor stores only valid valuations and coalesces the five-minute bucket'
  const f=setup(t),s={run_id:'m',budget:1000};await recordRunMark(f.db,s,[order('buy',10,10)],{});assert.equal(f.db.get("SELECT count(*) n FROM artifacts WHERE kind='portfolio_run_mark'").n,0);
  await recordRunMark(f.db,s,[order('buy',10,10)],{A:{price:11,asof:at}});await recordRunMark(f.db,s,[order('buy',10,10)],{A:{price:12,asof:at}});assert.equal(f.db.get("SELECT count(*) n FROM artifacts WHERE kind='portfolio_run_mark'").n,1);
 });
+
+test('catalog picks latest per strategy including timestamp ties and remains fresh after imports',async t=>{
+ const f=setup(t),catalog=new Map([['x',{id:'x',market:'US',name:'x',report:{full:{cagr_pct:99},dates:['old','old']}}]]);
+ const put=(id,kind,annual,created)=>f.db.sqlite.prepare('INSERT INTO artifacts VALUES(?,?,?,?,?,?)').run(id,kind,'x',JSON.stringify({report:{full:{cagr_pct:annual,max_drawdown_pct:-2,total_return_pct:4},dates:['2026-01-01','2026-09-01']},source:'sample',comparison:{cost_bps:10}}),'test',created);
+ put('a','portfolio_backtest',1,'2026-01-01');put('b','portfolio_backtest',2,'2026-02-01');put('c','portfolio_backtest',3,'2026-02-01');put('z','backtest',999,'2026-12-01');
+ let r=await rankedCatalog(f.db,catalog);assert.equal(r.strategies[0].metrics.annual,3);assert.equal(r.strategies[0].metrics.ratio,1.5);assert.equal(r.strategies[0].comparison_legacy,false);assert.equal(JSON.parse(r.strategies[0].cohort)[4],JSON.stringify({cost_bps:10}));
+ put('d','portfolio_backtest',4,'2026-03-01');r=await rankedCatalog(f.db,catalog);assert.equal(r.strategies[0].metrics.annual,4);assert.equal((await rankedCatalog(f.db,catalog,'reference')).strategies[0].metrics.annual,99);
+});

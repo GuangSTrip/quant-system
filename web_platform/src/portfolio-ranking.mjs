@@ -9,16 +9,14 @@ export function sortStrategies(items,key='recommended'){
  return [...items].sort((a,b)=>{if(key==='recommended')return Number(b.recommended)-Number(a.recommended)||a.name.localeCompare(b.name,'zh-CN');const av=a.metrics?.[key],bv=b.metrics?.[key];return (av==null)-(bv==null)||(av==null?0:direction*(av-bv))||a.name.localeCompare(b.name,'zh-CN');});
 }
 export async function rankedCatalog(db,catalog,source='latest'){
- // Read scalar summaries in SQLite, never load 178 full replay payloads into a Worker.
- const latest=source==='latest'?await rows(db,`SELECT a.name,
- json_extract(a.payload,'$.report.full') report_metrics,
- json_extract(a.payload,'$.report.dates[0]') date_from,
- json_extract(a.payload,'$.report.dates[#-1]') date_to,
- json_extract(a.payload,'$.source') source,
- json_extract(a.payload,'$.comparison') comparison,
+ // Select latest IDs before touching large replay payloads; parse each JSON once.
+ const latest=source==='latest'?await rows(db,`WITH latest AS MATERIALIZED (
+ SELECT name,id FROM (SELECT name,id,ROW_NUMBER() OVER(PARTITION BY name ORDER BY created_at DESC,id DESC) rn
+ FROM artifacts WHERE kind='portfolio_backtest') WHERE rn=1)
+ SELECT a.name,json_extract(a.payload,'$.report.full','$.report.dates[0]','$.report.dates[#-1]','$.source','$.comparison') summary,
  (SELECT json_extract(s.payload,'$.origin') FROM portfolio_signals s WHERE s.strategy_id=a.name ORDER BY s.signal_date DESC LIMIT 1) origin
- FROM artifacts a WHERE kind='portfolio_backtest' AND a.id=(SELECT b.id FROM artifacts b WHERE b.kind=a.kind AND b.name=a.name ORDER BY b.created_at DESC,b.id DESC LIMIT 1)`):[];
- const map=new Map(latest.map(r=>[r.name,r]));
+ FROM latest l JOIN artifacts a ON a.id=l.id`):[];
+ const map=new Map(latest.map(r=>{const [full,date_from,date_to,source,comparison]=JSON.parse(r.summary);return [r.name,{...r,report_metrics:JSON.stringify(full),date_from,date_to,source,comparison:comparison&&typeof comparison==='object'?JSON.stringify(comparison):comparison}];}));
  return {ok:true,source,strategies:[...catalog.values()].map(({report,...e})=>{
   const imported=map.get(e.id),selected=source==='reference'?report:imported?{full:JSON.parse(imported.report_metrics),dates:[imported.date_from,imported.date_to]}:null,metrics=performance(selected);
   const provenance=source==='reference'?'original-research':imported?.comparison||JSON.stringify([imported?.origin,imported?.source?.replace(/数据摘要 [a-f0-9]{16}/,'同规则数据摘要')]);

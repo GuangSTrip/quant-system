@@ -4,7 +4,7 @@
 <div class="app-shell">
   <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>三市场模拟交易</small></span></a>
     <nav aria-label="主导航">
-<div class="nav-group"><p class="nav-heading">模拟交易工作台</p><button data-view="overview" class="nav">账户首页</button><button data-view="portfolio" class="nav">选策略 · 开始模拟</button><button data-view="runs" class="nav">策略运行与记录</button></div>
+<div class="nav-group"><p class="nav-heading">模拟交易工作台</p><button data-view="overview" class="nav">账户首页</button><button data-view="portfolio" class="nav">选策略 · 开始模拟<small class="own-nav-hint" aria-hidden="true">★ 本组自研在这里</small></button><button data-view="runs" class="nav">策略运行与记录</button></div>
 <div class="nav-group"><p class="nav-heading">手动交易与订单</p><button data-view="cn-trade" class="nav">A 股 · 人民币</button><button data-view="trade" class="nav">美股 · 美元</button><button data-view="longbridge" class="nav">港股 · 港元</button></div>
 <div class="nav-group"><p class="nav-heading">进阶与管理</p><button data-view="strategies" class="nav">研究与自定义回测</button><button data-view="safety" class="nav">交易安全</button><button data-view="audit" class="nav">操作记录</button><button data-view="tools" class="nav">辅助工具</button></div></nav>
     <div class="sidebar-note"><div data-alpaca-only><strong id="broker-label">ALPACA PAPER</strong><p>美股与 ETF · USD<br>仅模拟资金</p></div><div data-cn-only><strong>A 股仿真账户</strong><p>掘金仿真 · CNY</p></div><div data-hk-only><strong>港股账户</strong><p>长桥模拟交易 · HKD</p></div><span id="identity-label">正在确认身份</span><button id="sign-in" class="button subtle">账号密码登录</button><button id="sign-out" class="button subtle" hidden>退出登录</button></div>
@@ -20,7 +20,8 @@
       <p id="center-capability" class="caption" role="status"></p><div id="center-tabs" class="segmented" aria-label="策略功能"></div>
     </section>
     <section id="view-showcase" class="view">
-      <article class="workspace-intro"><div><p class="eyebrow">QUANT SYSTEM / RESEARCH DESK</p><h2>让每一个交易决定，<br>都有研究可循。</h2><p>先检验历史表现，再选择策略进入模拟执行。</p></div><div class="workspace-mark" aria-hidden="true"><span>研究</span><i></i><span>验证</span><i></i><span>执行</span></div></article>
+      <article class="own-discovery"><div><span class="badge good">第 2 组 · 课程重点</span><h2>先看我们的自研策略</h2><p>日内增强均值回归 · 美股模拟盘</p><p>从为什么选这只股票，到何时买卖、历史回测和执行记录，一条流程看清楚。</p></div><button class="primary" data-own-strategy>查看本组自研策略 →</button></article>
+<article class="workspace-intro"><div><p class="eyebrow">QUANT SYSTEM / RESEARCH DESK</p><h2>让每一个交易决定，<br>都有研究可循。</h2><p>先检验历史表现，再选择策略进入模拟执行。</p></div><div class="workspace-mark" aria-hidden="true"><span>研究</span><i></i><span>验证</span><i></i><span>执行</span></div></article>
       <div class="entry-grid">
         <button class="entry-card" data-go="daily"><span class="entry-kicker">01 / EXPLORE</span><strong>探索日线策略 <span aria-hidden="true">↗</span></strong><span>比较选股、买卖时机与仓位，查看三市场历史表现。</span><em>A 股 · 港股 · 美股</em></button>
         <button class="entry-card" data-go="research"><span class="entry-kicker">02 / BACKTEST</span><strong>创建一份回测 <span aria-hidden="true">↗</span></strong><span>选择标的与规则，检查曲线、回撤和逐笔成交。</span><em>日线 · 分钟线</em></button>
@@ -79,6 +80,7 @@
     </section>
     <section id="view-overview" class="view" hidden>
 <article class="project-team" aria-labelledby="project-team-title"><div class="project-team-heading"><span class="project-team-badge">第 2 组</span><h2 id="project-team-title">智能投资大作业 · 项目成员</h2></div><ul class="project-team-members"><li><strong>马明睿</strong><span>26B951002</span></li><li><strong>宋航</strong><span>26S058036</span></li><li><strong>王贺</strong><span>26s165066</span></li><li><strong>赵彦光</strong><span>26B951049</span></li><li><strong>毕方琦</strong><span>26B951148</span></li></ul></article>
+<article class="own-discovery"><div><span class="badge good">第 2 组 · 课程重点</span><h2>先看我们的自研策略</h2><p>日内增强均值回归 · 美股模拟盘</p><p>从为什么选这只股票，到何时买卖、历史回测和执行记录，一条流程看清楚。</p></div><button class="primary" data-own-strategy>查看本组自研策略 →</button></article>
 <article class="workspace-intro"><div><p class="eyebrow">仅使用模拟资金</p><h2>从一个模拟策略开始</h2><p>登录 → 选策略 → 看历史回测与最新选股 → 设置预算 → 核对成交结果</p><p>校园用户共用已连接的模拟账户；操作会影响同一账户。</p></div><button class="primary" data-go="portfolio">选择策略 →</button></article>
 <div class="section-heading"><h2>三个市场，分别记账</h2><button id="workspace-refresh">刷新三个账户</button></div><p class="caption">人民币、美元、港币分别显示，不直接相加。账户可连接不代表当前可成交。</p><div id="workspace-accounts" class="workspace-grid" aria-live="polite"></div>
 <div class="entry-grid"><button class="entry-card" data-go="portfolio"><strong>① 选策略</strong><span>先看历史表现，再决定是否用模拟资金运行。</span></button><button class="entry-card" data-go="runs"><strong>② 看运行状态</strong><span>查看所有已部署策略，了解为什么正在等待或暂停。</span></button><button class="entry-card" data-go="safety"><strong>③ 管理交易安全</strong><span>按市场暂停新委托、设置限额和核对订单。</span></button></div></section>
