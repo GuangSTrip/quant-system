@@ -6,6 +6,7 @@ const config :Workerd.Config = (
       modules = [
         (name = "transport-test.mjs", esModule = embed "transport-test.mjs"),
         (name = "transport.mjs", esModule = embed "../../src/transport.mjs"),
+        (name = "intraday-kernel.mjs", esModule = embed "../../src/intraday-kernel.mjs"),
         (name = "minute-rules.mjs", esModule = embed "../../src/minute-rules.mjs"),
         (name = "engine.mjs", esModule = embed "../../src/engine.mjs")
       ],
