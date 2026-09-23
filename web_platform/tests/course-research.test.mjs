@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {buildPortfolioCatalog} from '../src/portfolio-contract.mjs';
-import {courseFrequency,matchingEntries,reportEvidence,dimensions,rankedEntries,balancedScore,optionExplanation,intervalMetrics} from '../src/course-research.mjs';
+import {courseFrequency,matchingEntries,reportEvidence,dimensions,rankedEntries,balancedScore,optionExplanation,intervalMetrics,COURSE_MINUTE_SNAPSHOTS,COURSE_MINUTE_INSTRUMENTS,rankMinuteStudies,runCourseMinuteStudy} from '../src/course-research.mjs';
 
 const read=name=>JSON.parse(readFileSync(new URL('../src/'+name,import.meta.url),'utf8'));
 const entries=[...buildPortfolioCatalog(read('modular-daily-results.json'),read('daily-refinement.json')).values()];
@@ -74,6 +74,26 @@ test('every selectable course option has a meaningful explanation and tradeoff',
     assert.match(optionExplanation('market',market),/股|美股/);
   }
   for(const key of ['frequency','chart-mode','reference','rank-by'])for(const value of {
-    frequency:['daily','longer'],'chart-mode':['equity','drawdown'],reference:['buyhold','liquidity','fund','none'],'rank-by':['return','total','drawdown','balanced']
+    frequency:['minute','daily','longer'],'chart-mode':['equity','drawdown'],reference:['buyhold','liquidity','fund','none'],'rank-by':['return','total','drawdown','balanced']
   }[key])assert.ok(optionExplanation(key,value).length>15,`${key} ${value}`);
+});
+test('course minute samples are dated snapshots and never enter daily strategy rankings',()=>{
+  const expected={CN:['600000.SH',20,4757],HK:['0700.HK',20,6621],US:['SPY',19,7410]};
+  for(const [market,[symbol,days,rows]] of Object.entries(expected)){
+    const snapshot=COURSE_MINUTE_SNAPSHOTS[market];assert.equal(snapshot.symbol,symbol);assert.equal(snapshot.timeframe,'1Min');assert.equal(snapshot.sample_kind,'historical');
+    assert.ok(COURSE_MINUTE_INSTRUMENTS[market].length>1);
+    assert.equal(new Set(snapshot.bars.map(b=>b.t.slice(0,10))).size,days);assert.equal(snapshot.bars.length,rows);
+  }
+  assert.equal(matchingEntries(entries,{market:'CN',frequency:'minute'}).length,0);
+});
+test('minute course ranking stays within one market and handles return, drawdown and balanced modes',()=>{
+  const mk=(id,ret,dd)=>({strategy:{id},result:{net:ret,initialCapital:100,budget:100,maxDrawdown:dd}});
+  const rows=[mk('b',5,-.1),mk('a',8,-.2),mk('c',-1,-.01)];
+  assert.deepEqual(rankMinuteStudies(rows,'return').map(x=>x.strategy.id),['a','b','c']);
+  assert.deepEqual(rankMinuteStudies(rows,'drawdown').map(x=>x.strategy.id),['c','b','a']);
+  assert.deepEqual(rankMinuteStudies(rows,'balanced').map(x=>x.strategy.id),['b','a','c']);
+});
+test('course minute study uses the selected market snapshot, reports its baseline and flags the short split',()=>{
+  const study=runCourseMinuteStudy('HK');assert.equal(study.snapshot.symbol,'0700.HK');assert.equal(study.strategies.length,3);
+  for(const row of study.strategies){assert.equal(row.result.days,20);assert.ok(Number.isFinite(row.result.baselineNet));assert.equal(row.validation.status,'样本不足：开发段和检验段均须至少 10 个交易日');assert.ok(row.stressed.totalCost>=row.result.totalCost);}
 });

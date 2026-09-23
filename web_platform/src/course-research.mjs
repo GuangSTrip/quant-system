@@ -2,10 +2,33 @@ import {buildPortfolioCatalog, strategyId} from './portfolio-contract.mjs';
 import {describeStrategy} from './portfolio-explain.mjs';
 import {createReplayUI} from './replay-ui.mjs';
 import {portfolioReplay} from './replay-model.mjs';
+import {runMinuteResearch,LIBRARY_MARKETS,LIBRARY_STRATEGIES} from './minute-library.mjs';
+import {minuteValidation} from './minute-validation.mjs';
+import cnMinute from '../demo-data/CN-1Min-snapshot.json' with {type:'json'};
+import hkMinute from '../demo-data/HK-1Min-snapshot.json' with {type:'json'};
+import usMinute from '../demo-data/SPY-1Min-snapshot.json' with {type:'json'};
 
 export const dimensions=['selection','timing','allocation','risk_policy'];
 export function courseFrequency(config){
   return config.timing!=='monthly'||config.risk_policy==='cushion07'?'daily':'longer';
+}
+export const COURSE_MINUTE_SNAPSHOTS={CN:cnMinute,HK:hkMinute,US:usMinute};
+export const COURSE_MINUTE_INSTRUMENTS={CN:'浦发银行',HK:'腾讯控股',US:'标普 500 指数 ETF'};
+export function runCourseMinuteStudy(market){
+  const snapshot=COURSE_MINUTE_SNAPSHOTS[market];if(!snapshot)throw Error('分钟数据暂不支持该市场');
+  const params={market,symbol:snapshot.symbol,budget:market==='US'?2000:100000,cost_bps:LIBRARY_MARKETS[market].costBps};
+  const strategies=LIBRARY_STRATEGIES.map(strategy=>{
+    const result=runMinuteResearch(snapshot.bars,{...params,type:strategy.id});
+    const validation=minuteValidation(snapshot,{...params,type:strategy.id});
+    const stressed=runMinuteResearch(snapshot.bars,{...params,type:strategy.id,costMultiplier:2});
+    return {strategy,result,validation,stressed};
+  });
+  return {market,snapshot,params,strategies};
+}
+export function rankMinuteStudies(rows,criterion='return'){
+  const score=row=>{const ret=row.result.net/row.result.initialCapital*100,dd=Math.abs(row.result.maxDrawdown)*100;
+    return criterion==='drawdown'?-dd:criterion==='balanced'&&ret>0?ret/Math.max(dd,1):criterion==='balanced'?-Infinity:ret;};
+  return [...rows].sort((a,b)=>score(b)-score(a)||a.strategy.id.localeCompare(b.strategy.id));
 }
 export function matchingEntries(entries, filters){
   return entries.filter(e=>(!filters.market||e.market===filters.market)&&
@@ -40,7 +63,7 @@ export function intervalMetrics(values,dates){
 export function optionExplanation(key,value,market='CN',rules=null){
   const fixed={
     market:{CN:'沪深 A 股，以人民币计价；本研究不含北交所。交易规则与港美股不同，结果需分市场查看。',HK:'港股，以港币计价；历史股票样本来自交易所清单的可用数据，并非全市场无偏样本。',US:'美股，以美元计价；历史股票样本来自交易所清单的可用数据，并非全市场无偏样本。'},
-    frequency:{daily:'课程中的“高频”：每天收盘检查买卖条件，可能次日开盘成交。只有日线数据，不能代表真正的高频交易；频繁成交会增加费用。',longer:'课程中的“低频”：以每 21 个交易日重选和调仓为主。波动仓位仍可能每 5 日更新；实际成交次数应看回测。'},
+    frequency:{minute:'分钟级日内研究：使用 1 分钟 OHLCV 回测日内买卖，分钟 K 线不含订单簿、排队和亚分钟成交信息；短样本只适合探索。',daily:'日线策略：每天收盘后按完整日线检查条件，最早下一交易日成交；这不等同于高频交易。',longer:'较长周期策略：通常每 21 个交易日重选和调仓；波动仓位仍可能每 5 日更新，实际成交频率以回测记录为准。'},
     'chart-mode':{equity:'把初始净值设为 1，比较资产如何增长；曲线越高并不代表回撤越小。',drawdown:'显示各曲线相对自身历史最高净值的跌幅；越接近 0，历史回撤越小。'},
     reference:{buyhold:'同市场初始合格股票里流动性最高的 100 只，下一交易日一次性买入目标 80% 股票，其余留现金；之后不换股。不是指数基金。',liquidity:'同市场流动性较高的股票篮子，每 21 个交易日重选；与策略使用相同基础费率，但它也在主动换股。',fund:market==='CN'?'华泰柏瑞沪深300ETF（510300.SH）：Tushare 基金日线与复权因子，完整覆盖本轮 A 股历史；一次买入，目标 80% 基金。':market==='HK'?'恒生指数ETF：盈富基金（2800.HK）跟踪恒生指数。使用 AkShare/Sina 前复权日线，覆盖本轮港股历史；分红再投资口径尚未单独对账，收益是近似值。':'SPY 指数基金：冻结分红复权日线只到 2026-05-29，选择后所有策略曲线一起截到该日。',none:'只看策略组合曲线，不叠加参考基准。'},
     'rank-by':{return:'按扣成本年化收益从高到低排列；同时看回撤和交易成本。',total:'按整个历史区间的扣成本累计收益排列；不同长度区间不能直接比较。',drawdown:'按历史最大回撤绝对值从低到高排列；少交易或长期空仓也可能排在前面。',balanced:'按正年化收益 ÷ max(最大回撤绝对值, 1%) 排列。这是展示取舍的自定义指标，不是盈利概率或独立验证。'}
@@ -68,13 +91,18 @@ export function createCourseResearch(root,chart,onExecute){
     <p>选择怎么选股、怎么买卖和分配资金，查看已有历史实验。展开选项后，把鼠标停在任一条或用键盘聚焦，可查看规则与取舍。更改选项读取已保存结果，不会重新回测或下单。</p>
     <div class="course-controls">
       <label>市场<select id="cr-market"><option value="CN">A 股 · CNY</option><option value="HK">港股 · HKD</option><option value="US">美股 · USD</option></select></label>
-      <label>课程交易频率<select id="cr-frequency"><option value="daily">高频 · 日级检查</option><option value="longer">低频 · 较长周期调仓</option></select></label>
-      <label>选股方法<select id="cr-selection"></select></label>
-      <label>买卖规则<select id="cr-timing"></select></label>
-      <label>仓位分配<select id="cr-allocation"></select></label>
-    </div><details><summary>额外风险控制</summary><label>仓位限制<select id="cr-risk_policy"></select></label></details>
+      <label>策略频率<select id="cr-frequency"><option value="minute">分钟级日内 · 1 分钟</option><option value="daily">日线策略 · 每日检查</option><option value="longer">较长周期 · 定期调仓</option></select></label>
+      <label class="cr-daily-only">选股方法<select id="cr-selection"></select></label>
+      <label class="cr-daily-only">买卖规则<select id="cr-timing"></select></label>
+      <label class="cr-daily-only">仓位分配<select id="cr-allocation"></select></label>
+    </div><details class="cr-daily-only"><summary>额外风险控制</summary><label>仓位限制<select id="cr-risk_policy"></select></label></details>
     <p id="cr-status" role="status">正在读取历史研究…</p>
-    <p class="caption">课程将日级检查称为高频，更长调仓周期称为低频。使用日线数据不代表每天成交；具体检查与调仓周期见规则。分钟短样本保留在进阶实验。</p>
+    <p id="cr-frequency-note" class="caption">分钟、日线与较长周期使用不同频率的数据和策略，结果只在各自类别内比较。</p>
+    </article>
+    <article class="panel" id="cr-minute-panel" hidden><h2>② 分钟级策略对比</h2><p id="cr-minute-provenance" class="caption"></p>
+      <div class="form-row"><label>排名依据<select id="cr-minute-rank"><option value="return">账户累计收益最高</option><option value="drawdown">最大回撤最低</option><option value="balanced">收益 / 回撤较均衡</option></select></label></div>
+      <p id="cr-minute-warning" class="notice"></p><div id="cr-minute-ranking" class="table-scroll course-ranking-table"></div>
+      <div id="cr-minute-chart" class="chart"></div><div id="cr-minute-legend" class="course-chart-legend" role="list" aria-label="分钟净值曲线图例"></div><p id="cr-minute-benchmark" class="caption"></p><div id="cr-minute-cards" class="course-minute-cards"></div>
     </article>
     <article class="panel" id="cr-result" hidden><h2>② 理由与历史效果</h2><h3 id="cr-title"></h3>
       <p id="cr-summary"></p><p id="cr-period" class="caption"></p>
@@ -91,6 +119,7 @@ export function createCourseResearch(root,chart,onExecute){
     <article class="panel" id="cr-comparison" hidden><div class="panel-head"><h2>曲线中的组合</h2><button id="cr-compare-clear">清空对比</button></div><p>只对比同市场、同历史来源及区间。优先只改变一个模块，检查其对收益、回撤和成本的影响。</p><div id="cr-compare-table" class="table-scroll"></div></article>
     <article class="panel course-next"><p>完成研究后，可带着同一配置进入独立模拟执行页；在那里再读取当前信号、账户与报价。</p><button id="cr-execute" disabled>使用这套配置进入模拟执行 →</button><details><summary>进阶研究工具</summary><div class="actions"><button data-go="daily">原有日线实验档案</button><button data-go="research">单标的自定义回测</button><button data-go="library">分钟短样本实验</button></div></details></article>`;
   const replay=createReplayUI($('replay'),chart);
+  let minuteStudy=null;
   const extras={earnings_value:'盈利收益率',dividend_defensive:'红利低波动',balanced_value:'价值动量低波动',smooth_momentum:'平稳中期动量',base:'无额外控制',risk06:'6% 波动目标',risk08:'8% 波动目标',cushion07:'净值缓冲'};
   function label(key,value){return original?.rules[key]?.[value]?.label||extras[value]||value;}
   const pickers=new Map();
@@ -110,7 +139,7 @@ export function createCourseResearch(root,chart,onExecute){
   function syncPickers(){for(const key of pickers.keys())syncPicker(key);}
   for(const key of ['market','frequency',...dimensions,'chart-mode','reference','rank-by']){
     const select=$(key),parent=select.parentElement,title=parent.firstChild.textContent.trim(),field=el('div','');
-    field.className='course-field';field.append(el('span',title));
+    field.className='course-field';for(const cls of parent.classList)field.classList.add(cls);field.append(el('span',title));
     const details=document.createElement('details'),summary=document.createElement('summary'),popover=el('div',''),list=el('div',''),preview=el('p','');
     details.className='course-picker';popover.className='course-picker-popover';list.className='course-picker-list';preview.className='course-picker-preview';preview.id='cr-'+key+'-help';
     popover.append(list,preview);details.append(summary,popover);field.append(select,details);parent.replaceWith(field);select.hidden=true;
@@ -120,7 +149,57 @@ export function createCourseResearch(root,chart,onExecute){
   }
   document.addEventListener('pointerdown',event=>{if(!root.contains(event.target))return;for(const picker of pickers.values())if(picker.details.open&&!picker.details.contains(event.target))picker.details.open=false;});
   syncPickers();
+  function showDailyControls(show){
+    for(const field of root.querySelectorAll('.cr-daily-only'))field.closest('.course-field')?.toggleAttribute('hidden',!show)??field.toggleAttribute('hidden',!show);
+  }
+  function renderMinuteStudy(){
+    const market=$('market').value;
+    minuteStudy=runCourseMinuteStudy(market);
+    const {snapshot,params,strategies}=minuteStudy,spec=LIBRARY_MARKETS[market];
+    const dates=[...new Set(snapshot.bars.map(bar=>bar.t.slice(0,10)))];
+    const instrument=`${snapshot.symbol}（${COURSE_MINUTE_INSTRUMENTS[market]}）`;
+    $('minute-provenance').textContent=`${spec.name} · ${instrument} · 1 分钟 OHLCV · ${dates.length} 个交易日（${dates[0]} 至 ${dates.at(-1)}）· ${snapshot.bars.length.toLocaleString('zh-CN')} 根 · ${snapshot.source} · 抓取于 ${snapshot.fetched_at||'日期未记录'}。每个市场目前只有这一个样本标的，不代表全市场。`;
+    $('minute-warning').textContent=`样本状态：${strategies[0].validation.status}。${market==='CN'?'A 股 T+1 已按次日开盘后才允许卖出；':'日内持仓按回测规则收盘前退出。'}当前费用按单边 ${params.cost_bps} 基点估算，并用双倍费用做压力测试；这不是完整券商佣金、印花税、买卖价差和冲击成本。分钟线也不含盘口队列或亚分钟成交信息，结果仅用于课堂探索，不证明长期有效。`;
+    const ranked=rankMinuteStudies(strategies,$('minute-rank').value),table=document.createElement('table'),head=table.createTHead().insertRow();
+    for(const title of ['名次','策略','账户累计收益（扣成本）','策略预算收益','最大回撤','对照基准收益','成交笔数','累计成本','双倍成本收益'])head.append(el('th',title));
+    const body=table.createTBody();for(const [index,row] of ranked.entries()){
+      const {strategy,result,stressed}=row,tr=body.insertRow(),metric=[String(index+1),strategy.name,pct(result.net/result.initialCapital*100),pct(result.net/result.budget*100),pct(Math.abs(result.maxDrawdown)*100),pct(result.baselineNet/result.initialCapital*100),String(result.orders.length),amount(result.totalCost)+' '+result.currency,pct(stressed.net/stressed.initialCapital*100)];
+      for(const value of metric)tr.append(el('td',value));
+    }
+    $('minute-ranking').replaceChildren(table);
+    const colors=['#527347','#b26d39','#7864a5'];
+    const pointsByDay=new Map(),series=strategies.map((row,index)=>({key:`m${index}`,name:row.strategy.name,color:colors[index]}));
+    series.push({key:'baseline',name:`同标的每日持有基准（${instrument}）`,color:'#627d9b'});
+    for(const [index,row] of strategies.entries())for(const point of row.result.curve){
+      const day=point.day||String(point.t).slice(0,10),entry=pointsByDay.get(day)||{t:day};
+      entry[`m${index}`]=point.equity/row.result.initialCapital;
+      if(index===0)entry.baseline=(point.baseline??point.benchmark)/row.result.initialCapital;
+      pointsByDay.set(day,entry);
+    }
+    chart('cr-minute-chart',[...pointsByDay.values()].sort((a,b)=>a.t.localeCompare(b.t)),series,value=>value.toFixed(4));
+    $('minute-legend').replaceChildren(...series.map(s=>{const item=el('span','');item.className='course-legend-item';item.setAttribute('role','listitem');const swatch=el('i','');swatch.style.background=s.color;item.append(swatch,el('span',s.name));return item;}));
+    const best=strategies[0].result;$('minute-benchmark').textContent=`基准口径：同标的、相同样本期和同一费用设定下每日持有，并遵守市场交易与结算规则；账户初始净值 100,000 ${best.currency}，策略预算 ${amount(best.budget)} ${best.currency}。图中净值均以账户初始资金归一为 1。三种策略使用预设参数，不做自动寻优；排名只说明这段样本的结果。`;
+    const cards=strategies.map(({strategy,result,validation,stressed})=>{
+      const card=el('article','');card.className='course-minute-card';card.append(el('h3',strategy.name),el('p',strategy.rule));
+      const localStamp=new Intl.DateTimeFormat('zh-CN',{timeZone:spec.zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+      const metrics=el('div','');metrics.className='mini-metrics';for(const [name,value] of [
+        ['账户净收益',amount(result.net)+' '+result.currency],['预算收益',pct(result.net/result.budget*100)],['最大回撤',pct(Math.abs(result.maxDrawdown)*100)],['累计成本',amount(result.totalCost)+' '+result.currency],['回测成交',`${result.orders.length} 笔`],['双倍成本收益',pct(stressed.net/result.initialCapital*100)]
+      ]){const item=el('div','');item.append(el('span',name),el('strong',value));metrics.append(item);}card.append(metrics);
+      const note=el('p',`${validation.status}。开发段 ${validation.development?.days??0} 日，检验段 ${validation.holdout?.days??0} 日；成本倍增后仍可能改变结论。`);note.className='caption';card.append(note);
+      const details=document.createElement('details'),summary=el('summary','查看模拟买卖记录（不是券商成交）'),wrap=el('div','');
+      const orders=result.orders.slice(0,12),orderTable=document.createElement('table'),orderHead=orderTable.createTHead().insertRow();for(const title of ['时间','方向','数量','价格','费用','触发理由'])orderHead.append(el('th',title));
+      const orderBody=orderTable.createTBody();for(const order of orders){const tr=orderBody.insertRow();for(const value of [localStamp.format(new Date(order.t))+' '+spec.zone,order.side==='buy'?'买入':'卖出',String(order.qty),amount(order.price),amount(order.cost),order.reason])tr.append(el('td',value));}
+      if(!orders.length)wrap.append(el('p','该策略在当前样本没有成交。'));else wrap.append(orderTable);
+      if(result.orders.length>orders.length)wrap.append(el('p',`仅显示前 ${orders.length} 笔，共 ${result.orders.length} 笔。`));details.append(summary,wrap);card.append(details);return card;
+    });
+    $('minute-cards').replaceChildren(...cards);
+  }
   function configure(){
+    const isMinute=$('frequency').value==='minute';showDailyControls(!isMinute);
+    $('minute-panel').hidden=!isMinute;$('result').hidden=isMinute;$('ranking').hidden=isMinute;$('history-panel').hidden=isMinute;$('comparison').hidden=isMinute;
+    $('execute').disabled=isMinute;
+    $('frequency-note').textContent=isMinute?'当前为分钟级日内研究。只比较所选市场、单一标的和相同历史区间；日线策略不能直接与分钟策略排名。':'日线与较长周期策略按各自决策节奏回测；“每日检查”不等于每天成交，也不等同于高频交易。';
+    if(isMinute){current=null;replay.clear();syncPickers();$('status').textContent='已载入三市场分钟快照；当前排名只覆盖所选市场的一只标的和预设参数。';renderMinuteStudy();return;}
     const fundOption=$('reference').querySelector('option[value="fund"]');
     fundOption.textContent={CN:'510300 · 沪深300ETF',HK:'恒生指数ETF · 盈富基金 2800',US:'SPY · 截至 2026-05'}[$('market').value];
     let rows=matchingEntries(entries,{market:$('market').value,frequency:$('frequency').value});
@@ -204,7 +283,7 @@ export function createCourseResearch(root,chart,onExecute){
     draw();
   }
   for(const key of ['market','frequency',...dimensions])$(key).onchange=()=>{if(key==='market'){comparison=[];comparisons();}configure();};
-  $('chart-mode').onchange=()=>{syncPicker('chart-mode');draw();};$('reference').onchange=()=>{syncPicker('reference');draw();};$('rank-by').onchange=()=>{syncPicker('rank-by');rankings();};
+  $('chart-mode').onchange=()=>{syncPicker('chart-mode');draw();};$('reference').onchange=()=>{syncPicker('reference');draw();};$('rank-by').onchange=()=>{syncPicker('rank-by');rankings();};$('minute-rank').onchange=()=>{if($('frequency').value==='minute')renderMinuteStudy();};
   $('compare-add').onclick=()=>{if(!current)return;if(comparison.some(e=>e.id===current.id)){$('status').textContent='该组合已在对比中。';return;}if(comparison.length>=3){$('status').textContent='最多比较 3 套，请先清空再选择。';return;}if(comparison.some(e=>e.market!==current.market||e.report.dates.join()!==current.report.dates.join())){$('status').textContent='区间不同，不能加入同一对比。';return;}comparison.push(current);comparisons();$('comparison').scrollIntoView({behavior:'smooth',block:'start'});};
   $('compare-clear').onclick=()=>{comparison=[];comparisons();};
   $('execute').onclick=()=>{if(current)onExecute(current.id);};
