@@ -20,6 +20,14 @@ test('MyQuant bridge rejects non-HTTPS configuration and unexpected paths before
   await assert.rejects(()=>myquantBridge({...env,MYQUANT_BRIDGE_URL:'http://127.0.0.1:8765'},'/v1/status'),/HTTPS/);
   await assert.rejects(()=>myquantBridge(env,'/v1/../../orders'),/路径无效/);
 });
+test('MyQuant retries transient GET once, marks exhausted reads, and never retries POST',async()=>{
+ const original=globalThis.fetch;let calls=0;
+ try{
+  globalThis.fetch=async()=>{calls++;if(calls===1)throw Error('temporary');return Response.json({ok:true});};assert.equal((await myquantBridge(env,'/v1/status')).ok,true);assert.equal(calls,2);
+  calls=0;globalThis.fetch=async()=>{calls++;return Response.json({error:'busy'},{status:503});};await assert.rejects(()=>myquantBridge(env,'/v1/status'),e=>e.retryableRead===true&&e.requestMethod==='GET');assert.equal(calls,2);
+  calls=0;globalThis.fetch=async()=>{calls++;throw Error('write lost');};await assert.rejects(()=>myquantBridge(env,'/v1/orders',{method:'POST',payload:{}}),e=>e.retryableRead===false&&e.requestMethod==='POST');assert.equal(calls,1);
+ }finally{globalThis.fetch=original;}
+});
 
 test('explicit local bridge accepts only the pinned loopback origin',async()=>{
   const local={...env,MYQUANT_BRIDGE_LOCAL_ONLY:'true',MYQUANT_BRIDGE_URL:'http://127.0.0.1:8765'};

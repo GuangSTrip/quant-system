@@ -25,6 +25,14 @@ test('concurrent scheduler invocations use a persistent lease and cannot submit 
 test('unknown submission pauses both strategy and global order entry without blind retry',async t=>{
  const h=await start(t);h.broker.onPost=()=>{throw Error('connection lost');};await worker.scheduled({},h.env);assert.equal(h.db.get('SELECT enabled FROM auto_strategy').enabled,0);assert.equal(h.db.get('SELECT halted FROM control').halted,1);await worker.scheduled({},h.env);assert.equal(h.broker.posts().length,1);
 });
+test('transient read failure stays enabled and the next scheduled cycle recovers without duplicate orders',async t=>{
+ const h=await start(t);let failures=0;h.broker.onGet=async u=>{if(u.pathname==='/v2/stocks/bars'){failures++;throw Error('temporary read timeout');}return null;};
+ const waiting=await worker.scheduled({},h.env);assert.equal(waiting.outcome,'waiting_connection');assert.equal(failures,2);assert.equal(h.broker.posts().length,0);assert.equal(h.db.get('SELECT enabled FROM auto_strategy').enabled,1);
+ let status=(await h.request('/api/v1/automation')).data;assert.equal(status.state.health,'degraded');assert.equal(status.state.consecutive_read_failures,1);assert.equal(status.state.execution_state,'waiting_connection');
+ h.broker.onGet=null;await worker.scheduled({},h.env);assert.equal(h.broker.posts().length,1);assert.equal(h.db.get('SELECT enabled FROM auto_strategy').enabled,1);
+ status=(await h.request('/api/v1/automation')).data;assert.equal(status.state.health,'healthy');assert.equal(status.state.consecutive_read_failures,0);
+ await worker.scheduled({},h.env);assert.equal(h.broker.posts().length,1);
+});
 test('external position drift pauses automation instead of selling unowned positions',async t=>{
  const h=await start(t);h.broker.positions=[{symbol:'SPY',qty:'1',market_value:'100'}];await worker.scheduled({},h.env);assert.equal(h.broker.posts().length,0);assert.equal(h.db.get('SELECT enabled FROM auto_strategy').enabled,0);assert.match(h.db.get('SELECT reason FROM auto_strategy').reason,/持仓/);
 });
@@ -56,6 +64,11 @@ test('expired heartbeat allows resume but resets prior execution status and reta
  const stale=new Date(Date.now()-3*3600000).toISOString();h.db.sqlite.prepare('UPDATE auto_strategy SET heartbeat_at=?').run(stale);
  h.db.sqlite.prepare('UPDATE control SET halted=1').run();assert.equal((await h.request('/api/v1/automation/resume',{confirm:'启动自动模拟交易'})).data.code,'HALTED');
  await h.resume();const resumed=await h.request('/api/v1/automation/resume',{confirm:'启动自动模拟交易'});assert.equal(resumed.data.state.enabled,1);assert.equal(resumed.data.state.execution_state,'awaiting_execution');assert.equal(resumed.data.state.last_check_at,null);assert.equal(resumed.data.scheduler.healthy,false);assert.equal(resumed.data.state.heartbeat_at,stale);
+});
+test('local scheduler heartbeat is declared stale after five minutes',async t=>{
+ const h=await start(t);h.env.SCHEDULER_LOCAL_ENABLED='true';
+ h.db.sqlite.prepare('UPDATE auto_strategy SET heartbeat_at=?').run(new Date(Date.now()-6*60000).toISOString());
+ const status=(await h.request('/api/v1/automation')).data;assert.equal(status.scheduler.kind,'local');assert.equal(status.scheduler.healthy,false);
 });
 
 test('automatic buy, broker fill reconciliation, and next daily exit preserve the strategy position ledger',async t=>{

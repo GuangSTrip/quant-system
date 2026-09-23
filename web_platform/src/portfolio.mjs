@@ -107,7 +107,7 @@ export function createPortfolio({catalog,adapters,audit}){
   const s=await get(db,'SELECT * FROM portfolio_runs WHERE market=?',market);if(!s?.enabled)return {ok:true,outcome:'paused'};
   if(s.lease_id){if(s.lease_until<Date.now())await pause(db,{id:'scheduler'},market,'执行中断，请核对后恢复',env);return {ok:true,outcome:'busy'};}
   const lease=crypto.randomUUID();const claimed=await run(db,'UPDATE portfolio_runs SET lease_id=?,lease_until=? WHERE market=? AND revision=? AND enabled=1 AND lease_id IS NULL',lease,Date.now()+600000,market,s.revision);if(!claimed.meta.changes)return {ok:true,outcome:'busy'};
-  let releaseLease=true;
+  let releaseLease=true,orderPrepared=false;
   const finish=async(outcome,details={})=>{await run(db,'UPDATE portfolio_runs SET reason=?,updated_at=? WHERE market=? AND run_id=?',outcome,nowISO(),market,s.run_id);return {ok:true,outcome,...details};};
   try{
    const a=adapter(market),e=entry(s.strategy_id);requireValue(e.version===s.version,'策略版本变化，请停止旧运行',409,'SIGNAL_VERSION');
@@ -152,6 +152,9 @@ export function createPortfolio({catalog,adapters,audit}){
     await run(db,'INSERT INTO portfolio_decisions(id,run_id,signal_id,phase,payload,created_at) VALUES(?,?,?,?,?,?)',phaseId,s.run_id,signalId,phase,JSON.stringify({orders,equity,cash,signal}),nowISO());record=await get(db,'SELECT * FROM portfolio_decisions WHERE id=?',phaseId);
    }
    const payload=JSON.parse(record.payload);
+   // Once the deterministic intent exists, any later uncertainty must pause and
+   // reconcile instead of being treated as a harmless read failure.
+   orderPrepared=true;
    requireValue(Date.now()<Date.parse(payload.signal.expires_at),'已保存的委托计划过期，禁止跨交易日重发',409,'DECISION_EXPIRED');
    for(const order of payload.orders){await portfolioGuard(db,market,s);const result=await a.submit(env,db,s,order);requireValue(result.ok,'委托未确认接收，暂停并等待对账',409,'ORDER_UNRESOLVED');}
    // A completed sell phase is never resent; partially filled/canceled sells leave cash for conservative buys.
@@ -164,6 +167,7 @@ export function createPortfolio({catalog,adapters,audit}){
    await audit(db,'portfolio:'+s.run_id,'portfolio_cycle',phaseId,{orders:payload.orders.length,signal_id:signalId});return finish(payload.orders.length?'submitted':'no_order');
   }catch(error){
    if(['SIGNAL_REQUIRED','SIGNAL_EXPIRED','STALE_QUOTE','CN_T1'].includes(error.code))return finish('waiting_data',{message:error.message});
+   if(!orderPrepared&&(error?.retryableRead===true||['BROKER_UNCERTAIN','LB_UNKNOWN','MYQUANT_BRIDGE_UNCERTAIN'].includes(error?.code)))return finish('waiting_connection',{message:'券商连接波动，后台将在下一轮自动重试；未提交订单',code:error.code||'BROKER_UNCERTAIN'});
    try{await pause(db,{id:'portfolio:'+s.run_id},market,error.message||'组合执行异常',env);}catch(storage){releaseLease=false;throw storage;}
    return {ok:false,outcome:'fault',code:error.code||'SERVICE_UNAVAILABLE',message:error.message};
   }finally{if(releaseLease)await run(db,'UPDATE portfolio_runs SET lease_id=NULL,lease_until=0 WHERE market=? AND lease_id=?',market,lease);}

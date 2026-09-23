@@ -15,7 +15,7 @@ test('failed refresh retains visibly stale data but never on authentication fail
  error=Object.assign(Error('login required'),{status:401});await assert.rejects(reader.read('longbridge/overview'));
 });
 test('unstarted, running, paused and completed are distinct and US scope is explicit',()=>{
- assert.equal(runLabel(null),'尚未启动');assert.equal(runLabel({run_id:'1',enabled:true}),'运行中');assert.equal(runLabel({run_id:'1',enabled:false}),'已暂停');assert.equal(runLabel({run_id:'1',outcome:'completed'}),'已结束');assert.equal(runReason('全局交易已暂停'),'美股交易已暂停');
+ assert.equal(runLabel(null),'尚未启动');assert.equal(runLabel({run_id:'1',enabled:true}),'运行中');assert.equal(runLabel({run_id:'1',enabled:false}),'已暂停');assert.equal(runLabel({run_id:'1',outcome:'completed'}),'已结束');assert.equal(runReason('全局交易已暂停'),'美股交易已暂停');assert.equal(runReason('waiting_connection'),'连接波动，后台自动重试');
 });
 
 test('concurrent catalog reads coalesce without caching completed rankings or sharing sources',async()=>{

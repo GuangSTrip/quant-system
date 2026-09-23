@@ -1,8 +1,8 @@
 {
-  "date": "2026-09-21",
+  "date": "2026-09-22",
   "web_tests": {
-    "total": 215,
-    "passed": 215,
+    "total": 232,
+    "passed": 232,
     "failed": 0
   },
   "python_research": {
@@ -19,5 +19,5 @@
   "artifact_validation": "passed",
   "private_value_scan": "10 known private values checked, no matches",
   "credential_pattern_review": "Only explicit test fixture password in web_platform/tests/helpers.mjs",
-  "external_acceptance": "See FINAL_DELIVERY.md for pending US market-hours and CN next-day checks"
+  "external_acceptance": "CN next-day T+1 sell and HK closed loop passed; see FINAL_DELIVERY.md for the pending US market-hours acceptance"
 }

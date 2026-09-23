@@ -25,7 +25,7 @@ export async function enhancedLedgerState(db,actor,bars,owned){
 }
 export function createAutomation(services){
   const {accountContext,history,snapshotQuote,requireCourseAsset,submitOrder,reconcile,audit,artifact,control,cancelOrders}=services;
-  async function status(db,env){const s=await autoState(db),limits=await control(db),healthy=Boolean(s.heartbeat_at&&Date.now()-Date.parse(s.heartbeat_at)>=0&&Date.now()-Date.parse(s.heartbeat_at)<75*60000),last=s.last_check_at?await get(db,'SELECT source FROM auto_cycles WHERE run_id IS ? AND created_at=? ORDER BY id DESC LIMIT 1',s.run_id,s.last_check_at):null;const execution_state=!s.enabled?'paused':!s.last_check_at?'awaiting_execution':last?.source==='manual'?'manual_checked':healthy?'scheduled_checked':'awaiting_scheduler';return {ok:true,limits:{max_order:limits.max_order,max_daily:limits.max_daily},state:{...s,execution_state,last_execution_source:last?.source||null,config:s.config?JSON.parse(s.config):null,lease_id:undefined},scheduler:{configured:Boolean(env.SCHEDULER_LOCAL_ENABLED==='true'||env.SCHEDULER_NATIVE==='true'||env.SCHEDULER_REPOSITORY_ID),kind:env.SCHEDULER_LOCAL_ENABLED==='true'?'local':env.SCHEDULER_NATIVE==='true'?'cloudflare':'github',healthy},cycles:(await rows(db,'SELECT * FROM auto_cycles ORDER BY id DESC LIMIT 60')).map(r=>({...r,details:JSON.parse(r.details)})),orders:(await rows(db,'SELECT client_id,status,broker_data,error FROM orders WHERE actor=? ORDER BY created_at DESC LIMIT 100','auto:'+s.run_id)).map(r=>({...r,broker_data:r.broker_data?JSON.parse(r.broker_data):null})),decisions:(await rows(db,'SELECT * FROM auto_decisions WHERE run_id=? ORDER BY created_at DESC LIMIT 30',s.run_id||'')).map(r=>({...r,payload:JSON.parse(r.payload)}))};}
+  async function status(db,env){const s=await autoState(db),limits=await control(db),kind=env.SCHEDULER_LOCAL_ENABLED==='true'?'local':env.SCHEDULER_NATIVE==='true'?'cloudflare':'github',maxHeartbeatAge=kind==='github'?75*60000:5*60000,heartbeatAge=s.heartbeat_at?Date.now()-Date.parse(s.heartbeat_at):Infinity,healthy=Boolean(heartbeatAge>=0&&heartbeatAge<maxHeartbeatAge),last=s.last_check_at?await get(db,'SELECT source FROM auto_cycles WHERE run_id IS ? AND created_at=? ORDER BY id DESC LIMIT 1',s.run_id,s.last_check_at):null,cycleRows=await rows(db,'SELECT * FROM auto_cycles ORDER BY id DESC LIMIT 60'),cycles=cycleRows.map(r=>({...r,details:JSON.parse(r.details)}));let consecutiveReadFailures=0;for(const cycle of cycles){if(cycle.run_id!==s.run_id)continue;if(cycle.outcome!=='waiting_connection')break;consecutiveReadFailures++;}const health=s.enabled&&consecutiveReadFailures?'degraded':'healthy',execution_state=!s.enabled?'paused':!s.last_check_at?'awaiting_execution':health==='degraded'?'waiting_connection':last?.source==='manual'?'manual_checked':healthy?'scheduled_checked':'awaiting_scheduler';return {ok:true,limits:{max_order:limits.max_order,max_daily:limits.max_daily},state:{...s,health,consecutive_read_failures:consecutiveReadFailures,execution_state,last_execution_source:last?.source||null,config:s.config?JSON.parse(s.config):null,lease_id:undefined},scheduler:{configured:Boolean(env.SCHEDULER_LOCAL_ENABLED==='true'||env.SCHEDULER_NATIVE==='true'||env.SCHEDULER_REPOSITORY_ID),kind,healthy},cycles,orders:(await rows(db,'SELECT client_id,status,broker_data,error FROM orders WHERE actor=? ORDER BY created_at DESC LIMIT 100','auto:'+s.run_id)).map(r=>({...r,broker_data:r.broker_data?JSON.parse(r.broker_data):null})),decisions:(await rows(db,'SELECT * FROM auto_decisions WHERE run_id=? ORDER BY created_at DESC LIMIT 30',s.run_id||'')).map(r=>({...r,payload:JSON.parse(r.payload)}))};}
   async function pause(db,user,reason='操作员暂停'){await autoState(db);await db.batch([db.prepare('UPDATE auto_strategy SET enabled=0,revision=revision+1,reason=?,updated_at=? WHERE id=1').bind(reason,nowISO()),await services.auditStatement(db,user.id,'strategy_paused',null,{reason})]);}
   async function configure(env,db,user,input){
     requireValue(input.confirm==='启动自动模拟交易','请输入“启动自动模拟交易”');
@@ -66,7 +66,7 @@ export function createAutomation(services){
     }
     const lease=crypto.randomUUID();const claimed=await run(db,'UPDATE auto_strategy SET lease_id=?,lease_until=? WHERE id=1 AND enabled=1 AND revision=? AND lease_id IS NULL',lease,Date.now()+180000,s.revision);if(!claimed.meta.changes)return {ok:true,outcome:'busy'};
     const user={id:'auto:'+s.run_id};
-    let releaseLease=true;
+    let releaseLease=true,orderPrepared=false;
     try{
       if((await control(db)).halted){await pause(db,user,'全局交易已暂停，请分别恢复交易和策略');return record(db,s,source,'halted',{message:'全局交易已暂停'});}
       requireValue((await reconcile(env,db,user)).ok,'自动对账未通过',409,'RECONCILIATION_FAILED');
@@ -94,7 +94,7 @@ export function createAutomation(services){
         const state=await enhancedLedgerState(db,user.id,bars,owned);
         const closing=Date.parse(ctx.clock.next_close)-Date.parse(ctx.clock.timestamp);
         const d=owned>0&&(state.overnight||(Number.isFinite(closing)&&closing<=15*60000))?{action:'sell',reason:state.overnight?'处理尚未平仓的跨日策略持仓':'券商交易日历：即将收市，申请平仓'}:enhancedDecision(enhancedSession(bars,bars.length-1),state,config);
-        decision={signal:d.action==='buy'?1:d.action==='sell'?0:null,reason:d.reason,value:null};
+        decision={...d,signal:d.action==='buy'?1:d.action==='sell'?0:null,value:d.deviation_bps??null};
         signal=decision.signal??(owned>0?1:0);
       }else{
         decision=minute?intradayDecision(bars,bars.length-1,config):null;
@@ -107,15 +107,19 @@ export function createAutomation(services){
       const order=Math.abs(delta)>=1?normalizeOrder({symbol:config.symbol,side:delta>0?'buy':'sell',qty:Math.floor(Math.abs(delta)),type:'limit',limit_price:price.toFixed(2),time_in_force:'day'}):null;
       const datasetId='data_'+(await digest({query:data.query,bars:data.bars})).slice(0,40);
       await services.saveArtifact(db,user,'dataset',config.symbol+' 自动策略决策数据',data,datasetId);
-      const key=crypto.randomUUID(),details={snapshot_id:datasetId,config,signal,signal_reason:decision?.reason||null,signal_value:decision?.value??null,signal_timestamp:bar.t,owned_qty:owned,target_qty:target,order,source:data.source,data_digest:await digest(bars),engine:ENGINE_VERSION,message:order?(decision?.reason||'信号变化')+'；'+config.symbol+' '+(order.side==='buy'?'买入':'卖出')+' '+order.qty+' 股，限价 '+order.limit_price+' USD':(decision?.reason||'保持当前仓位')+'；'+config.symbol+' 持仓 '+owned+' 股，无需下单'};
+      const key=crypto.randomUUID(),details={snapshot_id:datasetId,config,signal,signal_reason:decision?.reason||null,signal_value:decision?.value??null,signal_timestamp:bar.t,latest_price:decision?.price??bar.c,vwap:decision?.vwap??null,deviation_bps:decision?.deviation_bps??null,threshold_bps:decision?.threshold_bps??config.threshold_bps??null,guard_ok:decision?.guard_ok??null,held_bars:decision?.held_bars??null,owned_qty:owned,target_qty:target,order,source:data.source,data_digest:await digest(bars),engine:ENGINE_VERSION,message:order?(decision?.reason||'信号变化')+'；'+config.symbol+' '+(order.side==='buy'?'买入':'卖出')+' '+order.qty+' 股，限价 '+order.limit_price+' USD':(decision?.reason||'保持当前仓位')+'；'+config.symbol+' 持仓 '+owned+' 股，无需下单'};
       await autoGuard(db,{symbol:config.symbol},{run_id:s.run_id,revision:s.revision});
       await db.batch([db.prepare('INSERT INTO auto_decisions (id,run_id,bar_time,signal,payload,client_key,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(id,s.run_id,bar.t,signal,JSON.stringify(details),order?key:null,order?'prepared':'no_order',nowISO(),nowISO()),await services.auditStatement(db,user.id,'auto_decision',id,details)]);
       if(!order)return record(db,s,source,'no_order',details);
+      orderPrepared=true;
       const result=await submitOrder(env,db,user,{...order,confirm:true,idempotency_key:key},null,{run_id:s.run_id,revision:s.revision});
       await run(db,'UPDATE auto_decisions SET status=?,updated_at=? WHERE id=?',result.ok?'submitted':'unknown',nowISO(),id);
       requireValue(result.ok,'订单状态未确认，请对账后恢复',409,'UNRESOLVED_ORDER');
       return record(db,s,source,result.order.status==='filled'?'filled':'submitted',{...details,client_order_id:result.order.client_order_id,broker_status:result.order.status});
     }catch(e){
+      if(e?.retryableRead===true&&!orderPrepared){
+        return record(db,s,source,'waiting_connection',{message:'券商连接波动，后台将在下一轮自动重试；未提交订单',code:e.code||'BROKER_UNCERTAIN'});
+      }
       // If storage cannot persist the fault pause, keep the lease as a durable
       // recovery barrier. A later tick must not silently resume this run.
       try{await pause(db,user,e.message||'执行异常');}catch(storageError){releaseLease=false;throw storageError;}

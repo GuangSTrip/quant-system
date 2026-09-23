@@ -1,3 +1,4 @@
+import {OWN_RESEARCH_ASSETS} from './own-research-assets.mjs';
 import {ownResearch,ownDataset,ownRuns} from './own-strategy.mjs';
 import {inferAsOf,selectUniverse,U_MIN_HISTORY_DAYS,U_MAX_HISTORY_DAYS,U_DEFAULT_HISTORY_DAYS} from './universe-kernel.mjs';
 import {rankedCatalog} from './portfolio-ranking.mjs';
@@ -337,7 +338,7 @@ async function route(request,env){
   const url=new URL(request.url),path=url.pathname,method=request.method;
   if(!path.startsWith('/api/')){
     requireValue(method==='GET'||method==='HEAD','Method not allowed',405);
-    const asset={'/':[PAGE,'text/html'],'/index.html':[PAGE,'text/html'],'/styles.css':[CSS,'text/css'],'/app.js':[CLIENT,'text/javascript'],'/research-baseline.json':[FROZEN,'application/json'],'/library-demo.json':[LIBRARY_DEMO,'application/json'],'/current-daily-plan.json':[CURRENT_DAILY_PLAN,'application/json'],'/historical-daily-results.json':[HISTORICAL_DAILY_RESULTS,'application/json'],'/modular-daily-results.json':[MODULAR_DAILY_RESULTS,'application/json'],'/daily-refinement.json':[DAILY_REFINEMENT,'application/json'],'/course-benchmarks.json':[COURSE_BENCHMARKS,'application/json'],'/course-fund-benchmarks.json':[COURSE_FUND_BENCHMARKS,'application/json']}[path];
+    const asset={'/':[PAGE,'text/html'],'/index.html':[PAGE,'text/html'],'/styles.css':[CSS,'text/css'],'/app.js':[CLIENT,'text/javascript'],'/research-baseline.json':[FROZEN,'application/json'],'/library-demo.json':[LIBRARY_DEMO,'application/json'],'/current-daily-plan.json':[CURRENT_DAILY_PLAN,'application/json'],'/historical-daily-results.json':[HISTORICAL_DAILY_RESULTS,'application/json'],'/modular-daily-results.json':[MODULAR_DAILY_RESULTS,'application/json'],'/daily-refinement.json':[DAILY_REFINEMENT,'application/json'],'/course-benchmarks.json':[COURSE_BENCHMARKS,'application/json'],'/course-fund-benchmarks.json':[COURSE_FUND_BENCHMARKS,'application/json']}[path]||(Object.hasOwn(OWN_RESEARCH_ASSETS,path)?[OWN_RESEARCH_ASSETS[path],'application/json']:null);
     if(!asset)return new Response('Not found',{status:404});
     return new Response(method==='HEAD'?null:asset[0],{headers:{'content-type':asset[1]+'; charset=utf-8','cache-control':'no-cache','content-security-policy':"default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",'x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});
   }

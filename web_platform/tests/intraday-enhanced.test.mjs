@@ -25,6 +25,8 @@ test('kernel: entry needs deviation, opening window, and a calm tape',()=>{
   const early=enhancedSession([...Array.from({length:20},(_,i)=>bar(base,i,100)),bar(base,20,99.0)],20);
   assert.equal(enhancedDecision(early,{qty:0,entriesToday:0,entryTime:null},config()).action,'hold'); // minute 590 < 600
   assert.ok(momentumGuardOk(enhancedSession(calm,30),31,20,1.5));
+  assert.ok(Number.isFinite(decision.price));assert.ok(Number.isFinite(decision.vwap));assert.ok(decision.deviation_bps>=60);assert.equal(decision.threshold_bps,60);assert.equal(decision.guard_ok,true);
+  const above=enhancedDecision(enhancedSession([...Array.from({length:31},(_,i)=>bar(base,i,i===30?101:100))],30),{qty:0,entriesToday:0,entryTime:null},config());assert.match(above.reason,/高于VWAP/);assert.ok(above.deviation_bps<0);
 });
 
 test('kernel: exits are VWAP recovery, time stop, and the last-15-minute window',()=>{

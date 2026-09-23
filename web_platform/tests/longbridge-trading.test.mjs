@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash,createHmac} from 'node:crypto';
 import {setup} from './helpers.mjs';
 import {seal,signedHeaders} from '../src/longbridge.mjs';
-import {normalizeHK,hkWindow} from '../src/longbridge-trading.mjs';
+import {normalizeHK,hkWindow,tradeRequest} from '../src/longbridge-trading.mjs';
 const creds={app_key:'fixture-key',app_secret:'fixture-secret',access_token:'fixture-token'};
 async function fixture(t){
  const base=setup(t);base.env.BROKER_CREDENTIAL_KEY=Buffer.alloc(32,9).toString('base64');base.env.SCHEDULER_REPOSITORY_ID='fixture';
@@ -81,6 +81,14 @@ test('automation faults safely on uncertain submit and credential replacement in
  const changed=await seal(f.env,{...creds,access_token:'new-fixture-token'});f.db.sqlite.prepare('UPDATE longbridge_connection SET ciphertext=?').run(changed);
  r=await f.request('/api/v1/longbridge/trading');assert.equal(r.data.control.enabled,false);assert.equal(r.data.orders.length,0);
 });
+test('Longbridge GET retries once and automation remains enabled through a read outage',async t=>{
+ let calls=0;const data=await tradeRequest(creds,'GET','/v1/asset/account',{},undefined,async()=>{calls++;if(calls===1)throw Error('temporary');return Response.json({code:0,data:{list:[]}});});assert.deepEqual(data,{list:[]});assert.equal(calls,2);
+ calls=0;await assert.rejects(()=>tradeRequest(creds,'POST','/v1/trade/order',{}, {},async()=>{calls++;throw Error('uncertain write');}),e=>e.retryableRead===false);assert.equal(calls,1);
+ const f=await fixture(t);await f.enable();const old=Date.now;let time=Date.parse('2026-09-18T10:00:00+08:00');Date.now=()=>time;t.after(()=>Date.now=old);f.db.sqlite.prepare('UPDATE auth_sessions SET expires_at=?').run(Date.now()+8*3600000);
+ await f.request('/api/v1/longbridge/auto/start',{...f.order(),budget:2000,interval_minutes:5,confirm:'启动长桥自动模拟交易'});const prior=globalThis.fetch;let failures=0;globalThis.fetch=async(url,opts={})=>{if(String(url).includes('openapi.longbridge.com')&&(opts.method||'GET')==='GET'&&failures<2){failures++;throw Error('read outage');}return prior(url,opts);};
+ let r=await f.request('/api/v1/longbridge/auto/tick',{});assert.equal(r.data.outcome,'waiting_connection',JSON.stringify(r.data));assert.equal(f.db.get('SELECT enabled FROM lb_auto').enabled,1);assert.equal(f.lb.posts.length,0);
+ r=await f.request('/api/v1/longbridge/auto/tick',{});assert.equal(r.data.outcome,'submitted',JSON.stringify(r.data));assert.equal(f.lb.posts.length,1);
+});
 
 test('pause during risk checks blocks dispatch and storage failure before intent never submits',async t=>{
  const f=await fixture(t);await f.enable();const prior=globalThis.fetch;let intercepted=false;
@@ -99,6 +107,10 @@ test('native background scheduler advances Longbridge without a browser and upda
  const f=await fixture(t);f.env.SCHEDULER_NATIVE='true';await f.enable();const old=Date.now;Date.now=()=>Date.parse('2026-09-18T10:00:00+08:00');t.after(()=>Date.now=old);f.db.sqlite.prepare('UPDATE auth_sessions SET expires_at=?').run(Date.now()+8*3600000);
  await f.request('/api/v1/longbridge/auto/start',{...f.order(),budget:2000,interval_minutes:5,confirm:'启动长桥自动模拟交易'});
  const {default:worker}=await import('../worker/index.js');const r=await worker.scheduled({},f.env);assert.equal(r.longbridge.outcome,'submitted');assert.ok(f.db.get('SELECT heartbeat_at FROM lb_auto').heartbeat_at);assert.equal(f.lb.posts.length,1);
+});
+test('Longbridge reports a stale local scheduler heartbeat after five minutes',async t=>{
+ const f=await fixture(t);f.env.SCHEDULER_LOCAL_ENABLED='true';await f.enable();f.db.sqlite.prepare('UPDATE lb_auto SET heartbeat_at=?').run(new Date(Date.now()-6*60000).toISOString());
+ const r=await f.request('/api/v1/longbridge/trading');assert.equal(r.data.scheduler.kind,'local');assert.equal(r.data.scheduler.healthy,false);
 });
 test('unknown longbridge receipt cannot be accepted for another symbol or oversize fill',async t=>{
  const f=await fixture(t);await f.enable();const p=f.order();await f.request('/api/v1/longbridge/orders/submit',p);f.lb.orders.get('101').symbol='700.HK';assert.equal((await f.request('/api/v1/longbridge/orders/inspect',{client_id:p.client_id})).data.code,'LB_RECEIPT_MISMATCH');assert.equal(f.db.get('SELECT broker_data FROM lb_orders').broker_data,null);

@@ -1,4 +1,4 @@
-import {createCourseResearch} from './course-research.mjs';
+import {createUnifiedResearch} from './unified-research.mjs';
 import {createRunHistoryUI} from './portfolio-history-ui.mjs';
 import {cnSymbol,cnName} from './cn-symbol.mjs';
 import {createAccountReader} from './account-reader.mjs';
@@ -54,7 +54,7 @@ import {createDailyWorkbench} from './daily-workbench.mjs';
   const longbridgePanel=createLongbridgePanel(api);
   const hkTrading=createHKTradingUI(api);
   const portfolioUI=createPortfolioUI($('portfolio-workbench'),api,chart,()=>Boolean(state.session?.operator));
-  const courseResearch=createCourseResearch($('course-workbench'),chart,id=>{showView('portfolio',true);portfolioUI.load(id);});
+  const courseResearch=createUnifiedResearch($('course-workbench'),chart,id=>{showView('portfolio',true);portfolioUI.load(id);});
   const classroomReplay=createReplayUI($('classroom-replay'),chart),libraryReplay=createReplayUI($('library-replay'),chart),researchReplay=createReplayUI($('research-replay'),chart);
   const minuteLab=createMinuteLab($('minute-lab'),r=>{libraryReplay.set(minuteReplay(r));$('library-archive-details').hidden=true;text('library-warning','当前显示本地重算结果 · '+(r.sampleKind==='historical'?'历史数据':'合成数据')+' · '+r.source);});
   const strategyViews=new Set(['replay','daily','research','library','strategy']);

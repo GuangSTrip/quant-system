@@ -3,6 +3,8 @@ import http from 'node:http';
 import https from 'node:https';
 import {readFileSync} from 'node:fs';
 import {campusIP} from './campus-network.mjs';
+import {gatewayRevision,gatewayPolicyVerified} from './gateway-runtime.mjs';
+const runtime={ok:true,revision:gatewayRevision(),policyVerified:gatewayPolicyVerified(campusIP),startedAt:new Date().toISOString()};
 const ca=readFileSync(new URL('../.lan/server-cert.pem',import.meta.url));
 const clients=new Map(),connections=new Map();let inflight=0;
 const hosts=new Set(['10.250.27.137:8791','127.0.0.1:8791','localhost:8791']);
@@ -26,6 +28,11 @@ export const server=http.createServer((req,res)=>{
  if(req.url.length>2048)return json(res,414,{ok:false});
  if(!req.url.startsWith('/')||req.url.startsWith('//'))return json(res,400,{ok:false});
  let url;try{url=new URL(req.url,'http://'+host);}catch{return json(res,400,{ok:false});}
+ // Loopback-only diagnostic reports the policy actually loaded by this process.
+ if(url.pathname==='/_gateway/health'){
+  if(ip!=='127.0.0.1'||req.method!=='GET')return json(res,404,{ok:false});
+  return json(res,200,runtime);
+ }
  if(!['GET','HEAD','POST'].includes(req.method))return json(res,405,{ok:false,error:'不支持的请求方法。'});
  const now=Date.now();let rate=clients.get(ip);
  if(!rate||now-rate.start>60000){if(clients.size>=4096&&!rate)return json(res,503,{ok:false});rate={start:now,count:0};clients.set(ip,rate);}
@@ -37,7 +44,7 @@ export const server=http.createServer((req,res)=>{
  }
  if(url.pathname==='/lan-client.js'&&req.method!=='POST'){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});return res.end(req.method==='HEAD'?'':browserScript);}
  // Never expose Wrangler devtools/scheduled endpoints or local disk files.
- if(!assets.has(url.pathname)&&!url.pathname.startsWith('/api/'))return json(res,404,{ok:false,error:'页面不存在'});
+ if(!assets.has(url.pathname)&&url.pathname!=='/own-studies.json'&&!/^\/own-study-(CN|HK|US)-(daily|alternatives|fundamental)-(base|risk|v5|v1)\.json$/.test(url.pathname)&&!url.pathname.startsWith('/api/'))return json(res,404,{ok:false,error:'页面不存在'});
  if(inflight>=32)return json(res,503,{ok:false,error:'访问繁忙，请稍后重试。'});
  const limit=url.pathname==='/api/v1/portfolio/backtests'?2000000:url.pathname==='/api/v1/portfolio/signals'?500000:20000;
  if(Number(req.headers['content-length']||0)>limit)return json(res,413,{ok:false,error:'请求过大'});

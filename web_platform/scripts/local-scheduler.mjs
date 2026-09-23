@@ -6,8 +6,10 @@ if(vars.SCHEDULER_LOCAL_ENABLED!=='true'||!vars.SCHEDULER_LOCAL_SECRET)throw Err
 const ca=readFileSync(new URL('.lan/server-cert.pem',root));
 async function tick(){
  const result=await new Promise((resolve,reject)=>{
-  const req=https.request('https://127.0.0.1:8792/api/v1/scheduler/tick',{method:'POST',ca,timeout:180000,headers:{'x-local-scheduler-secret':vars.SCHEDULER_LOCAL_SECRET}},res=>{let body='';res.on('data',c=>body+=c);res.on('end',()=>{try{const data=JSON.parse(body);resolve({at:new Date().toISOString(),http:res.statusCode,ok:data.ok,outcome:data.outcome,code:data.code,longbridge:data.longbridge,portfolios:data.portfolios});}catch{reject(Error('Invalid response'));}});});
-  req.on('error',reject);req.on('timeout',()=>req.destroy(Error('Scheduler timeout')));req.end();
+  let settled=false;const finish=(fn,value)=>{if(settled)return;settled=true;clearTimeout(deadline);fn(value);};
+  const req=https.request('https://127.0.0.1:8792/api/v1/scheduler/tick',{method:'POST',ca,timeout:180000,headers:{'x-local-scheduler-secret':vars.SCHEDULER_LOCAL_SECRET}},res=>{let body='';res.on('data',c=>body+=c);res.on('end',()=>{try{const data=JSON.parse(body);finish(resolve,{at:new Date().toISOString(),http:res.statusCode,ok:data.ok,outcome:data.outcome,code:data.code,longbridge:data.longbridge,portfolios:data.portfolios});}catch{finish(reject,Error('Invalid response'));}});});
+  const deadline=setTimeout(()=>req.destroy(Error('Scheduler absolute timeout')),190000);
+  req.on('error',error=>finish(reject,error));req.on('timeout',()=>req.destroy(Error('Scheduler timeout')));req.end();
  });
  writeFileSync(new URL('.lan/scheduler-status.json',root),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }

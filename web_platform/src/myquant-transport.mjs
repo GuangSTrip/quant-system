@@ -18,12 +18,17 @@ function targetFor(base,path){
 
 export async function myquantBridge(env,path,{method='GET',payload,actor='web-operator'}={}){
   const {base,secret}=bridgeConfig(env),target=targetFor(base,path);
-  let response;
-  try{
-    response=await fetch(target,{method,redirect:'manual',signal:AbortSignal.timeout(15000),headers:{accept:'application/json','x-myquant-bridge-secret':secret,'x-myquant-actor':String(actor).slice(0,120),...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify(payload)}:{})});
-  }catch(error){console.error('myquant_transport_failed',path,error?.name,String(error?.message||'').replaceAll(secret,'[redacted]').slice(0,200));throw new AppError('A股桥接连接失败；订单状态未知前不会重试，请先检查桥接服务并对账',503,'MYQUANT_BRIDGE_UNCERTAIN');}
+  let response,lastError;const attempts=method==='GET'?2:1;
+  for(let attempt=0;attempt<attempts;attempt++){
+   try{response=await fetch(target,{method,redirect:'manual',signal:AbortSignal.timeout(12000),headers:{accept:'application/json','x-myquant-bridge-secret':secret,'x-myquant-actor':String(actor).slice(0,120),...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify(payload)}:{})});lastError=null;}
+   catch(error){lastError=error;response=null;}
+   const transient=!response||[408,429,500,502,503,504].includes(response.status);
+   if(!(method==='GET'&&transient&&attempt+1<attempts))break;
+   await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  if(lastError||!response){console.error('myquant_transport_failed',path,lastError?.name,String(lastError?.message||'').replaceAll(secret,'[redacted]').slice(0,200));const error=new AppError(method==='GET'?'A股桥接读取连接波动，后台将自动重试':'A股桥接连接失败；订单状态未知前不会重试，请先检查桥接服务并对账',503,'MYQUANT_BRIDGE_UNCERTAIN');error.retryableRead=method==='GET';error.requestMethod=method;throw error;}
   if(response.status>=300&&response.status<400)throw new AppError('A股桥接返回重定向，已停止请求',502,'MYQUANT_BRIDGE_REDIRECT');
   let data;try{data=await response.json();}catch{throw new AppError('A股桥接返回内容无法解析，请查询桥接审计记录',502,'MYQUANT_BRIDGE_INVALID_RESPONSE');}
-  if(!response.ok)throw new AppError(String(data?.error||`A股桥接请求失败 (${response.status})`).slice(0,500),response.status>=500?502:response.status,String(data?.code||'MYQUANT_BRIDGE_REJECTED'));
+  if(!response.ok){const error=new AppError(String(data?.error||`A股桥接请求失败 (${response.status})`).slice(0,500),response.status>=500?502:response.status,String(data?.code||'MYQUANT_BRIDGE_REJECTED'));error.retryableRead=method==='GET'&&[408,429,500,502,503,504].includes(response.status);error.requestMethod=method;throw error;}
   return data;
 }

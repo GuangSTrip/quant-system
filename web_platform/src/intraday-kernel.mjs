@@ -35,29 +35,29 @@ export function enhancedDecision(session,state,c){
   // qty, entriesToday and entryTime (the entry decision bar's timestamp).
   if(!session.length)return {action:'hold',reason:'无行情'};
   const upto=session.length,b=session.at(-1),minute=marketMinute(b.t).minute;
+  const vwap=vwapUpto(session,upto),thresholdBps=c.threshold_bps??ENHANCED_DEFAULTS.threshold_bps;
+  const metrics=extra=>({price:b.c,vwap,deviation_bps:vwap===null?null:(vwap-b.c)/vwap*10000,threshold_bps:thresholdBps,...extra});
   const stop=Math.min(c.time_stop_bars??ENHANCED_DEFAULTS.time_stop_bars,390);
   if(minute>=SESSION_CLOSE-15)
-    return state.qty>0?{action:'sell',reason:'收盘前15分钟窗口:强制离场'}:{action:'hold',reason:'收盘前窗口,空仓等待收盘'};
+    return state.qty>0?metrics({action:'sell',reason:'收盘前15分钟窗口:强制离场'}):metrics({action:'hold',reason:'收盘前窗口,空仓等待收盘'});
   if(state.qty>0){
-    const vwap=vwapUpto(session,upto);
-    if(vwap!==null&&b.c>=vwap)return {action:'sell',reason:'回归VWAP:止盈'};
+    if(vwap!==null&&b.c>=vwap)return metrics({action:'sell',reason:'回归VWAP:止盈'});
     const held=heldBars(session,state.entryTime);
-    if(held!==null&&held>=stop)return {action:'sell',reason:'时间止损:持仓 '+held+' 棒未回归'};
-    return {action:'hold',reason:'持有中',held_bars:held};
+    if(held!==null&&held>=stop)return metrics({action:'sell',reason:'时间止损:持仓 '+held+' 棒未回归',held_bars:held});
+    return metrics({action:'hold',reason:'持有中',held_bars:held});
   }
   if(state.entriesToday>= (c.max_entries_per_day??ENHANCED_DEFAULTS.max_entries_per_day))
-    return {action:'hold',reason:'当日入场次数已用尽'};
+    return metrics({action:'hold',reason:'当日入场次数已用尽'});
   if(minute< (c.entry_start_minute??ENHANCED_DEFAULTS.entry_start_minute))
-    return {action:'hold',reason:'开盘观察窗口'};
-  const vwap=vwapUpto(session,upto);
-  if(vwap===null)return {action:'hold',reason:'无成交量'};
-  const deviation=(vwap-b.c)/vwap,threshold=(c.threshold_bps??ENHANCED_DEFAULTS.threshold_bps)/10000;
+    return metrics({action:'hold',reason:'开盘观察窗口'});
+  if(vwap===null)return metrics({action:'hold',reason:'无成交量'});
+  const deviation=(vwap-b.c)/vwap,threshold=thresholdBps/10000;
   if(deviation>=threshold){
-    if(momentumGuardOk(session,upto,c.lookback??ENHANCED_DEFAULTS.lookback,c.guard_sigma??ENHANCED_DEFAULTS.guard_sigma))
-      return {action:'buy',reason:'低于VWAP '+(deviation*1e4).toFixed(0)+'bp(阈值 '+(threshold*1e4).toFixed(0)+'bp)且非自由落体'};
-    return {action:'hold',reason:'偏差达标但前'+(c.lookback??ENHANCED_DEFAULTS.lookback)+'棒自由落体,放弃'};
+    const guardOk=momentumGuardOk(session,upto,c.lookback??ENHANCED_DEFAULTS.lookback,c.guard_sigma??ENHANCED_DEFAULTS.guard_sigma);
+    if(guardOk)return metrics({action:'buy',reason:'低于VWAP '+(deviation*1e4).toFixed(0)+'bp(阈值 '+thresholdBps.toFixed(0)+'bp)且非自由落体',guard_ok:true});
+    return metrics({action:'hold',reason:'偏差达标但前'+(c.lookback??ENHANCED_DEFAULTS.lookback)+'棒自由落体,放弃',guard_ok:false});
   }
-  return {action:'hold',reason:'偏差 '+(deviation>0?(deviation*1e4).toFixed(0):0)+'bp 未达阈值'};
+  return metrics({action:'hold',reason:deviation>=0?'低于VWAP '+(deviation*1e4).toFixed(0)+'bp，未达到 '+thresholdBps.toFixed(0)+'bp 买入阈值':'高于VWAP '+Math.abs(deviation*1e4).toFixed(0)+'bp，无需买入'});
 }
 function heldBars(session,entryTime){
   if(!entryTime)return null;

@@ -54,6 +54,11 @@ def run_once(config,providers,publisher,state):
         ids=options.get('strategies','all')
         if ids=='all':ids=[k for k,v in entries.items() if v['market']==market]
         if not ids or any(i not in entries or entries[i]['market']!=market for i in ids):raise ValueError('Invalid registered strategy ids')
+        # Keep live quotes available even when a historical signal is rejected.
+        if market in ('HK','CN'):
+            needed=sorted(set(symbols+publisher.get('portfolio').get('quote_symbols',{}).get(market,[])))
+            quote=provider.quotes(needed,datetime.now(timezone.utc),calendar)
+            if quote:publisher.post('portfolio/quotes',fresh_quotes(quote,datetime.now(timezone.utc)))
         if state.get(market)!=key:
             # Frozen per-session artifacts survive restarts and provider historical revisions.
             saved=ROOT/'.paper_state'/'portfolio-signals'/hashlib.sha256((key+VERSION).encode()).hexdigest()
@@ -72,17 +77,26 @@ def run_once(config,providers,publisher,state):
                         temporary=paths[strategy_id].with_suffix('.tmp')
                         temporary.write_text(json.dumps(result,ensure_ascii=False,allow_nan=False))
                         temporary.replace(paths[strategy_id])
+            rejected=[]
+            from urllib.error import HTTPError
             for strategy_id in ids:
                 result=json.loads(paths[strategy_id].read_text())
-                publisher.post('portfolio/backtests',result)
-                publisher.post('portfolio/signals',result['signal'])
+                try:
+                    publisher.post('portfolio/backtests',result)
+                    publisher.post('portfolio/signals',result['signal'])
+                except HTTPError as error:
+                    if error.code!=409:raise
+                    rejected.append(strategy_id)
+                    print(market,'signal rejected:',strategy_id,'HTTP 409; prior signal retained',flush=True)
             state[market]=key
+            if rejected:
+                # A deterministic conflict will not heal by resending every 30s.
+                # Remember the session attempt, retain old signals, and keep quotes polling.
+                state[market+':rejected']=rejected
+                print(market,'partial publication; conflicting strategies blocked:',len(rejected),flush=True)
+                continue
+            state.pop(market+':rejected',None)
             print(market,'published completed-session signals',session['signal_date'],flush=True)
-        if market in ('HK','CN'):
-            # Includes currently managed positions even when they left today's selection.
-            needed=sorted(set(symbols+publisher.get('portfolio').get('quote_symbols',{}).get(market,[])))
-            quote=provider.quotes(needed,datetime.now(timezone.utc),calendar)
-            if quote:publisher.post('portfolio/quotes',fresh_quotes(quote,datetime.now(timezone.utc)))
 
 
 def main():

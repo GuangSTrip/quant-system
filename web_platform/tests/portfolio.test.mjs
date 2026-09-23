@@ -51,6 +51,11 @@ test('same-date signals immutable; stale quote waits and external position drift
  f.broker.quote.latestQuote.t='2020-01-01';assert.equal((await f.request('/api/v1/portfolio/tick',{market:'US'})).data.outcome,'waiting_data');assert.equal(f.broker.posts().length,0);
  f.broker.quote.latestQuote.t=new Date().toISOString();f.broker.positions=[{symbol:'SPY',qty:'1'}];assert.equal((await f.request('/api/v1/portfolio/tick',{market:'US'})).data.code,'POSITION_DRIFT');assert.equal(f.db.get('SELECT enabled FROM portfolio_runs').enabled,0);
 });
+test('transient portfolio reads wait for the next cycle without pausing or submitting',async t=>{
+ const f=await fixture(t);await start(f);let failures=0;f.broker.onGet=async u=>{if(u.pathname!=='/v2/account')return null;failures++;throw Error('temporary read timeout');};
+ let r=await f.request('/api/v1/portfolio/tick',{market:'US'});assert.equal(r.data.outcome,'waiting_connection',JSON.stringify(r.data));assert.equal(failures,2);assert.equal(f.db.get('SELECT enabled FROM portfolio_runs').enabled,1);assert.equal(f.broker.posts().length,0);
+ f.broker.onGet=null;r=await f.request('/api/v1/portfolio/tick',{market:'US'});assert.equal(r.data.outcome,'submitted',JSON.stringify(r.data));assert.equal(f.broker.posts().length,2);
+});
 test('timeout/unknown never resends; failure persisting fault retains lease',async t=>{
  const f=await fixture(t);await start(f);f.broker.onPost=()=>{throw Error('timeout');};f.broker.lookupMissing=true;
  const r=await f.request('/api/v1/portfolio/tick',{market:'US'});assert.equal(r.data.code,'ORDER_UNRESOLVED');assert.equal(f.broker.posts().length,1);assert.equal(f.db.get('SELECT enabled FROM portfolio_runs').enabled,0);

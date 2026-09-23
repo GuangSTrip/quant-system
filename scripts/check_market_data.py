@@ -1,5 +1,22 @@
 from datetime import datetime,timezone
 import sys
+if '--diagnose-hk' in sys.argv:
+    import json
+    from pathlib import Path
+    from urllib.error import HTTPError
+    from portfolio_service import run_once
+    from portfolio_signal import Publisher
+    from portfolio_providers import LongbridgeData
+    config=json.loads(Path('configs/portfolio_service.local.json').read_text())
+    config['markets']={'HK':config['markets']['HK']}
+    publisher=Publisher(config['site_origin'])
+    try:
+        run_once(config,{'HK':LongbridgeData()},publisher,{})
+    except HTTPError as e:
+        detail=json.loads(e.read())
+        print(json.dumps({'http':e.code,'code':detail.get('code'),'error':detail.get('error')},ensure_ascii=False))
+    finally:publisher.post('auth/logout',{})
+    raise SystemExit(0)
 from portfolio_providers import AlpacaData,LongbridgeData
 from myquant_data import MyQuantData
 if '--live-only' in sys.argv:

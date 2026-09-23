@@ -13,11 +13,17 @@ export async function tradeRequest(credentials,method,path,params={},payload,fet
  requireValue(allow.has(method+' '+path),'不支持的长桥交易接口',400,'LB_ENDPOINT');
  const query=new URLSearchParams(params).toString(),body=payload===undefined?undefined:JSON.stringify(payload);
  const headers=await signedHeaders(credentials,path,query,String(Math.floor(Date.now()/1000)),method,body);
- let response,data;
- try{response=await fetcher('https://openapi.longbridge.com'+path+(query?'?'+query:''),{method,headers,redirect:'manual',signal:AbortSignal.timeout(12000),...(body===undefined?{}:{body})});data=await response.json();}
- catch{throw new AppError('长桥请求超时或返回异常；交易结果待核对，禁止重复提交',502,'LB_UNKNOWN');}
+ let response,data,lastError;const attempts=method==='GET'?2:1;
+ for(let attempt=0;attempt<attempts;attempt++){
+  try{response=await fetcher('https://openapi.longbridge.com'+path+(query?'?'+query:''),{method,headers,redirect:'manual',signal:AbortSignal.timeout(12000),...(body===undefined?{}:{body})});data=await response.json();lastError=null;}
+  catch(error){lastError=error;response=null;}
+  const transient=!response||[408,429,500,502,503,504].includes(response.status);
+  if(!(method==='GET'&&transient&&attempt+1<attempts))break;
+  await new Promise(resolve=>setTimeout(resolve,250));
+ }
+ if(lastError||!response){const error=new AppError(method==='GET'?'长桥读取连接波动，后台将自动重试':'长桥请求超时或返回异常；交易结果待核对，禁止重复提交',502,'LB_UNKNOWN');error.retryableRead=method==='GET';error.requestMethod=method;throw error;}
  requireValue(response.status<300||response.status>=400,'长桥重定向已阻止；请核对订单',502,'LB_UNKNOWN');
- if(!response.ok||data?.code!==0){const definite=response.status>=400&&response.status<500&&response.status!==408||response.ok&&Number.isSafeInteger(data?.code)&&data.code!==0;throw new AppError('长桥请求未成功（错误码 '+(Number.isSafeInteger(data?.code)?data.code:response.status)+'）',502,definite?'LB_REJECTED':'LB_UNKNOWN');}
+ if(!response.ok||data?.code!==0){const definite=response.status>=400&&response.status<500&&response.status!==408||response.ok&&Number.isSafeInteger(data?.code)&&data.code!==0,error=new AppError('长桥请求未成功（错误码 '+(Number.isSafeInteger(data?.code)?data.code:response.status)+'）',502,definite?'LB_REJECTED':'LB_UNKNOWN');error.retryableRead=method==='GET'&&!definite;error.requestMethod=method;throw error;}
  requireValue(data.data&&typeof data.data==='object','长桥返回不完整，请核对订单',502,'LB_UNKNOWN');return data.data;
 }
 export function normalizeHK(input){
@@ -51,7 +57,8 @@ async function refreshReceipts(env,db){
 export async function tradingState(env,db){const c=await control(db),a=await first(db,'SELECT * FROM lb_auto WHERE id=1'),row=await first(db,'SELECT ciphertext FROM longbridge_connection WHERE id=1'),tag=row?await digest(row.ciphertext):null;
  let receipt_sync_error=null;
  if(row&&!c.lease_id)try{await lock(db,()=>refreshReceipts(env,db));}catch(error){receipt_sync_error=safeError(error);}
- return {ok:true,receipt_sync_error,control:{enabled:Boolean(c.enabled&&tag===c.connection_tag),max_order:c.max_order,max_daily:c.max_daily,busy:!!c.lease_id,lease_until:c.lease_until,environment_basis:'强制 X-Papertrading: true；模拟 Token 由券商校验'},automation:{...a,config:a.config?JSON.parse(a.config):null},scheduler:{configured:env.SCHEDULER_LOCAL_ENABLED==='true'||env.SCHEDULER_NATIVE==='true'||Boolean(env.SCHEDULER_REPOSITORY_ID),healthy:!!a.heartbeat_at&&Date.now()-Date.parse(a.heartbeat_at)<75*60000},orders:(await rows(db,'SELECT * FROM lb_orders WHERE connection_tag=? ORDER BY created_at DESC LIMIT 100',tag||'')).map(publicOrder)};
+ const schedulerKind=env.SCHEDULER_LOCAL_ENABLED==='true'?'local':env.SCHEDULER_NATIVE==='true'?'cloudflare':'github',maxHeartbeatAge=schedulerKind==='github'?75*60000:5*60000,heartbeatAge=a.heartbeat_at?Date.now()-Date.parse(a.heartbeat_at):Infinity;
+ return {ok:true,receipt_sync_error,control:{enabled:Boolean(c.enabled&&tag===c.connection_tag),max_order:c.max_order,max_daily:c.max_daily,busy:!!c.lease_id,lease_until:c.lease_until,environment_basis:'强制 X-Papertrading: true；模拟 Token 由券商校验'},automation:{...a,config:a.config?JSON.parse(a.config):null},scheduler:{configured:env.SCHEDULER_LOCAL_ENABLED==='true'||env.SCHEDULER_NATIVE==='true'||Boolean(env.SCHEDULER_REPOSITORY_ID),kind:schedulerKind,healthy:heartbeatAge>=0&&heartbeatAge<maxHeartbeatAge},orders:(await rows(db,'SELECT * FROM lb_orders WHERE connection_tag=? ORDER BY updated_at DESC LIMIT 100',tag||'')).map(publicOrder)};
 }
 export async function setTrading(env,db,user,input){
  await init(db);
@@ -147,7 +154,7 @@ export async function pauseHKAuto(env,db,user){await init(db);await run(db,"UPDA
 async function outcome(db,name,reason){await run(db,'UPDATE lb_auto SET last_at=?,outcome=?,reason=?,updated_at=? WHERE id=1',nowISO(),name,reason,nowISO());return {ok:name!=='fault',outcome:name,message:reason};}
 export async function tickHK(env,db,source='manual'){
  await init(db);if(source!=='manual')await run(db,'UPDATE lb_auto SET heartbeat_at=? WHERE id=1',nowISO());
- let a=await first(db,'SELECT * FROM lb_auto WHERE id=1');if(!a.enabled)return {ok:true,outcome:'paused'};
+ let a=await first(db,'SELECT * FROM lb_auto WHERE id=1');if(!a.enabled)return {ok:true,outcome:'paused'};let submissionStarted=false;
  try{return await lock(db,async()=>{
  a=await first(db,'SELECT * FROM lb_auto WHERE id=1');if(!a.enabled)return {ok:true,outcome:'paused'};
  const c=JSON.parse(a.config),ctx=await authorized(env,db);requireValue(c.connection_tag===ctx.tag,'连接已更换，策略停止',409);
@@ -161,11 +168,12 @@ export async function tickHK(env,db,source='manual'){
  if(Date.now()<a.next_at)return outcome(db,'waiting','尚未到达下一次定投时间');
  const reserved=fresh.reduce((n,x)=>n+x.notional,0);if(reserved+c.price*c.quantity>c.budget){await run(db,'UPDATE lb_auto SET enabled=0 WHERE id=1');return outcome(db,'completed','总预算已用尽，策略自动结束；撤单不返还本轮预算');}
  const id='lba_'+a.run_id.replaceAll('-','')+'_'+a.sequence;
+ submissionStarted=true;
  const result=await submitLocked(env,db,{id:'lb-auto:'+a.run_id},{...c,client_id:id,confirm:true},a.run_id);
  requireValue(result.ok,'委托未确认接收，策略暂停，请核对',409);
  await run(db,'UPDATE lb_auto SET sequence=sequence+1,next_at=? WHERE id=1 AND run_id=?',Date.now()+c.interval_minutes*60000,a.run_id);
  await audit(db,'lb-auto:'+a.run_id,'lb_auto_cycle',id,{source,notional:c.price*c.quantity});return outcome(db,'submitted','已提交限价委托，等待券商成交；关闭网页不影响后台调度');
- });}catch(e){if(e.code==='LB_BUSY')return {ok:true,outcome:'busy',message:e.message};await run(db,'UPDATE lb_auto SET enabled=0 WHERE id=1');return outcome(db,'fault',safeError(e));}
+ });}catch(e){if(e.code==='LB_BUSY')return {ok:true,outcome:'busy',message:e.message};if(!submissionStarted&&(e?.retryableRead===true||e?.code==='LB_UNKNOWN'))return outcome(db,'waiting_connection','长桥连接波动，后台将在下一轮自动重试；未提交订单');await run(db,'UPDATE lb_auto SET enabled=0 WHERE id=1');return outcome(db,'fault',safeError(e));}
 }
 export async function changeHKConnection(db,fn){return lock(db,async()=>{
  await portfolioGuard(db,'HK');

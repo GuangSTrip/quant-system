@@ -1,5 +1,5 @@
 param(
-  [string[]]$CampusSubnets = @('10.250.0.0/16','10.251.0.0/16','10.252.0.0/16','10.253.0.0/16')
+  [string[]]$CampusSubnets = @('10.248.0.0/13')
 )
 $ErrorActionPreference = 'Stop'
 if (-not $CampusSubnets.Count -or ($CampusSubnets | Where-Object { $_ -in @('Any','*','0.0.0.0/0','::/0') })) {

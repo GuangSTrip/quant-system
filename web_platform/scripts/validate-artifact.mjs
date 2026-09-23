@@ -33,3 +33,10 @@ for (const name of ['library-demo.json','modular-daily-results.json','daily-refi
   assert.deepEqual(packaged,original, name+' must match the complete source report');
 }
 console.log('Embedded research JSON is complete and matches source reports');
+const ownManifest=JSON.parse(await readFile(resolve(projectRoot,'src/own-research/manifest.json'),'utf8'));
+for(const [path,file] of [['/own-studies.json','manifest.json'],...ownManifest.studies.map(s=>[s.path,s.id+'.json'])]){
+ const response=await workerModule.default.fetch(new Request('http://localhost'+path),{});
+ assert.equal(response.status,200,path);
+ assert.deepEqual(await response.json(),JSON.parse(await readFile(resolve(projectRoot,'src/own-research',file),'utf8')),path);
+}
+console.log('All ten frozen own-study records and manifest are served intact');

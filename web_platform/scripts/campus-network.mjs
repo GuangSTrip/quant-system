@@ -5,5 +5,5 @@ export function campusIP(value){
  if(isIP(ip)!==4)return false;
  if(ip==='127.0.0.1')return true;
  const [first,second]=ip.split('.').map(Number);
- return first===10&&second>=250&&second<=253;
+ return first===10&&second>=248&&second<=255;
 }

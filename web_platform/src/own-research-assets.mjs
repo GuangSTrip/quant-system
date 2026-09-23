@@ -1,0 +1,12 @@
+import manifest from './own-research/manifest.json';
+import study0 from './own-research/CN-daily-base.json';
+import study1 from './own-research/CN-daily-risk.json';
+import study2 from './own-research/CN-alternatives-v5.json';
+import study3 from './own-research/HK-daily-base.json';
+import study4 from './own-research/HK-daily-risk.json';
+import study5 from './own-research/HK-alternatives-v5.json';
+import study6 from './own-research/US-daily-base.json';
+import study7 from './own-research/US-daily-risk.json';
+import study8 from './own-research/US-alternatives-v5.json';
+import study9 from './own-research/CN-fundamental-v1.json';
+export const OWN_RESEARCH_ASSETS={'/own-studies.json':manifest,'/own-study-CN-daily-base.json':study0,'/own-study-CN-daily-risk.json':study1,'/own-study-CN-alternatives-v5.json':study2,'/own-study-HK-daily-base.json':study3,'/own-study-HK-daily-risk.json':study4,'/own-study-HK-alternatives-v5.json':study5,'/own-study-US-daily-base.json':study6,'/own-study-US-daily-risk.json':study7,'/own-study-US-alternatives-v5.json':study8,'/own-study-CN-fundamental-v1.json':study9};
