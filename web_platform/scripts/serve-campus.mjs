@@ -17,7 +17,7 @@ function sessionCookie(header=''){
  const token=found[0].slice('quant_lan_session='.length);
  return /^[\w-]{43}$/.test(token)?'__Host-quant_session='+token:'';
 }
-const assets=new Set(['/','/index.html','/styles.css','/app.js','/research-baseline.json','/library-demo.json','/current-daily-plan.json','/historical-daily-results.json','/modular-daily-results.json','/daily-refinement.json']);
+const assets=new Set(['/','/index.html','/styles.css','/app.js','/research-baseline.json','/library-demo.json','/current-daily-plan.json','/historical-daily-results.json','/modular-daily-results.json','/daily-refinement.json','/course-benchmarks.json','/course-fund-benchmarks.json']);
 export const server=http.createServer((req,res)=>{
  const ip=req.socket.remoteAddress,host=req.headers.host;
  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');

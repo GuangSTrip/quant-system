@@ -9,7 +9,7 @@ import {tradingState,setTrading,previewHK,submitHK,inspectHK,cancelHK,recoverHK,
 import {connectionStatus,saveConnection,removeConnection,connectionOverview} from './longbridge.mjs';
 import {hkOverview} from './hk.mjs';
 import {AppError,requireValue,nowISO,digest,numeric,symbol,SYMBOLS,INTRADAY_SYMBOLS,strategyConfig,isIntraday,backtest,normalizeOrder,riskCheck,ENGINE_VERSION} from './engine.mjs';
-import {PAGE,CSS,CLIENT,FROZEN,LIBRARY_DEMO,CURRENT_DAILY_PLAN,HISTORICAL_DAILY_RESULTS,MODULAR_DAILY_RESULTS,DAILY_REFINEMENT} from './assets.mjs';
+import {PAGE,CSS,CLIENT,FROZEN,LIBRARY_DEMO,CURRENT_DAILY_PLAN,HISTORICAL_DAILY_RESULTS,MODULAR_DAILY_RESULTS,DAILY_REFINEMENT,COURSE_BENCHMARKS,COURSE_FUND_BENCHMARKS} from './assets.mjs';
 import {broker} from './transport.mjs';
 import {myquantBridge} from './myquant-transport.mjs';
 import {identity,login,logout} from './auth.mjs';
@@ -337,7 +337,7 @@ async function route(request,env){
   const url=new URL(request.url),path=url.pathname,method=request.method;
   if(!path.startsWith('/api/')){
     requireValue(method==='GET'||method==='HEAD','Method not allowed',405);
-    const asset={'/':[PAGE,'text/html'],'/index.html':[PAGE,'text/html'],'/styles.css':[CSS,'text/css'],'/app.js':[CLIENT,'text/javascript'],'/research-baseline.json':[FROZEN,'application/json'],'/library-demo.json':[LIBRARY_DEMO,'application/json'],'/current-daily-plan.json':[CURRENT_DAILY_PLAN,'application/json'],'/historical-daily-results.json':[HISTORICAL_DAILY_RESULTS,'application/json'],'/modular-daily-results.json':[MODULAR_DAILY_RESULTS,'application/json'],'/daily-refinement.json':[DAILY_REFINEMENT,'application/json']}[path];
+    const asset={'/':[PAGE,'text/html'],'/index.html':[PAGE,'text/html'],'/styles.css':[CSS,'text/css'],'/app.js':[CLIENT,'text/javascript'],'/research-baseline.json':[FROZEN,'application/json'],'/library-demo.json':[LIBRARY_DEMO,'application/json'],'/current-daily-plan.json':[CURRENT_DAILY_PLAN,'application/json'],'/historical-daily-results.json':[HISTORICAL_DAILY_RESULTS,'application/json'],'/modular-daily-results.json':[MODULAR_DAILY_RESULTS,'application/json'],'/daily-refinement.json':[DAILY_REFINEMENT,'application/json'],'/course-benchmarks.json':[COURSE_BENCHMARKS,'application/json'],'/course-fund-benchmarks.json':[COURSE_FUND_BENCHMARKS,'application/json']}[path];
     if(!asset)return new Response('Not found',{status:404});
     return new Response(method==='HEAD'?null:asset[0],{headers:{'content-type':asset[1]+'; charset=utf-8','cache-control':'no-cache','content-security-policy':"default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",'x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});
   }

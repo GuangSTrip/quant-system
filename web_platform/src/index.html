@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 模拟交易工作台</title><link rel="stylesheet" href="/styles.css?v=lemon-1"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quant System 课程模拟交易平台：真实行情、策略回测、Paper 订单、风控与审计"><title>Quant System · 课程策略研究</title><link rel="stylesheet" href="/styles.css?v=lemon-1"></head>
 <body>
 <div class="app-shell">
-  <aside class="sidebar"><a class="brand" href="#overview"><b>Q</b><span>QUANT SYSTEM<small>三市场模拟交易</small></span></a>
+  <aside class="sidebar"><a class="brand" href="#course"><b>Q</b><span>QUANT SYSTEM<small>课程策略研究</small></span></a>
     <nav aria-label="主导航">
-<div class="nav-group"><p class="nav-heading">模拟交易工作台</p><button data-view="overview" class="nav">账户首页</button><button data-view="portfolio" class="nav">选策略 · 开始模拟<small class="own-nav-hint" aria-hidden="true">★ 本组自研在这里</small></button><button data-view="runs" class="nav">策略运行与记录</button></div>
-<div class="nav-group"><p class="nav-heading">手动交易与订单</p><button data-view="cn-trade" class="nav">A 股 · 人民币</button><button data-view="trade" class="nav">美股 · 美元</button><button data-view="longbridge" class="nav">港股 · 港元</button></div>
-<div class="nav-group"><p class="nav-heading">进阶与管理</p><button data-view="strategies" class="nav">研究与自定义回测</button><button data-view="safety" class="nav">交易安全</button><button data-view="audit" class="nav">操作记录</button><button data-view="tools" class="nav">辅助工具</button></div></nav>
+<div class="nav-group"><p class="nav-heading">课程研究</p><button data-view="course" class="nav">策略研究 · 组合规则</button><button data-view="runs" class="nav">模拟运行记录</button></div>
+<details class="nav-group"><summary>模拟执行</summary><button data-view="portfolio" class="nav">配置与当前计划</button><button data-view="overview" class="nav">三市场账户</button><button data-view="cn-trade" class="nav">A 股订单</button><button data-view="trade" class="nav">美股订单</button><button data-view="longbridge" class="nav">港股订单</button></details>
+<details class="nav-group"><summary>设置与进阶</summary><button data-view="strategies" class="nav">旧研究与自定义回测</button><button data-view="safety" class="nav">交易安全</button><button data-view="audit" class="nav">操作记录</button><button data-view="tools" class="nav">实验与维护工具</button></details></nav>
     <div class="sidebar-note"><div data-alpaca-only><strong id="broker-label">ALPACA PAPER</strong><p>美股与 ETF · USD<br>仅模拟资金</p></div><div data-cn-only><strong>A 股仿真账户</strong><p>掘金仿真 · CNY</p></div><div data-hk-only><strong>港股账户</strong><p>长桥模拟交易 · HKD</p></div><span id="identity-label">正在确认身份</span><button id="sign-in" class="button subtle">账号密码登录</button><button id="sign-out" class="button subtle" hidden>退出登录</button></div>
   </aside>
   <main>
@@ -16,10 +16,11 @@
     <div data-alpaca-only id="operator-notice" class="notice" hidden>当前可查看实时账户。使用网站的课程账号和密码登录后，可回测、提交模拟订单及修改风控。</div>
 
     <section id="strategy-center" class="panel strategy-center" hidden aria-label="策略选择">
-      <div class="form-row"><label>① 选择频率<select id="center-frequency"><option value="minute">高频 · 分钟级日内</option><option value="daily">低频 · 日线</option></select></label><label class="center-choice">② 选择具体策略<select id="center-strategy"></select></label></div>
+      <div class="form-row"><label>① 选择频率<select id="center-frequency"><option value="minute">分钟短样本实验</option><option value="daily">日线历史研究</option></select></label><label class="center-choice">② 选择具体策略<select id="center-strategy"></select></label></div>
       <p id="center-capability" class="caption" role="status"></p><div id="center-tabs" class="segmented" aria-label="策略功能"></div>
     </section>
-    <section id="view-showcase" class="view">
+    <section id="view-course" class="view"><div id="course-workbench"></div></section>
+    <section id="view-showcase" class="view" hidden>
       <article class="own-discovery"><div><span class="badge good">第 2 组 · 课程重点</span><h2>先看我们的自研策略</h2><p>日内增强均值回归 · 美股模拟盘</p><p>从为什么选这只股票，到何时买卖、历史回测和执行记录，一条流程看清楚。</p></div><button class="primary" data-own-strategy>查看本组自研策略 →</button></article>
 <article class="workspace-intro"><div><p class="eyebrow">QUANT SYSTEM / RESEARCH DESK</p><h2>让每一个交易决定，<br>都有研究可循。</h2><p>先检验历史表现，再选择策略进入模拟执行。</p></div><div class="workspace-mark" aria-hidden="true"><span>研究</span><i></i><span>验证</span><i></i><span>执行</span></div></article>
       <div class="entry-grid">
@@ -86,7 +87,7 @@
 <div class="entry-grid"><button class="entry-card" data-go="portfolio"><strong>① 选策略</strong><span>先看历史表现，再决定是否用模拟资金运行。</span></button><button class="entry-card" data-go="runs"><strong>② 看运行状态</strong><span>查看所有已部署策略，了解为什么正在等待或暂停。</span></button><button class="entry-card" data-go="safety"><strong>③ 管理交易安全</strong><span>按市场暂停新委托、设置限额和核对订单。</span></button></div></section>
 <section id="view-runs" class="view" hidden><article class="panel"><div class="panel-head"><h2>当前自动执行任务</h2><button id="runs-refresh">刷新运行状态</button></div><p>开启表示允许后台按条件执行，不代表已经买入。实际成交请到对应市场的订单列表核对。</p><button class="primary" data-go="portfolio">选择并启动一个策略</button></article><div id="workspace-runs" class="workspace-grid" aria-live="polite"></div><article id="run-history" class="panel"></article></section>
 <section id="view-safety" class="view" hidden><article class="panel"><h2>先选择要管理的市场</h2><p>每个市场独立控制。暂停新委托不会撤销已经提交的订单，也不会自动卖出持仓。</p></article><div class="entry-grid"><button class="entry-card" data-go="cn-trade"><strong>A 股交易安全</strong><span>查看连接状态、暂停新增委托、对账后恢复。</span></button><button class="entry-card" data-go="risk"><strong>美股交易安全</strong><span>设置交易限额、暂停与恢复、核对账户和订单。</span></button><button class="entry-card" data-go="longbridge"><strong>港股交易安全</strong><span>设置限额、暂停新增交易、核对券商回报。</span></button></div></section>
-<section id="view-tools" class="view" hidden><article class="panel"><h2>按需使用，不是开始交易的必经步骤</h2><div class="actions"><button data-go="automation">美股单标的自动策略</button><button data-go="us-account">美股资产曲线与行情</button><button data-go="showcase">研究资料概览</button></div><details><summary>维护者：美股模拟交易验收</summary><p>用于测试连接、回测、下单和撤单。后续步骤会创建模拟订单，日常使用无需执行。</p><button data-go="acceptance">进入验收工具</button></details></article></section>
+<section id="view-tools" class="view" hidden><article class="panel"><h2>进阶实验与维护</h2><p>分钟样本较短，暂不作为课程日级／较长周期研究的主线。</p><button data-own-strategy>本组分钟均值回归实验</button><div class="actions"><button data-go="automation">美股单标的自动策略</button><button data-go="us-account">美股资产曲线与行情</button><button data-go="showcase">研究资料概览</button></div><details><summary>维护者：美股模拟交易验收</summary><p>用于测试连接、回测、下单和撤单。后续步骤会创建模拟订单，日常使用无需执行。</p><button data-go="acceptance">进入验收工具</button></details></article></section>
     <section id="view-us-account" class="view" hidden>
       <div class="metrics"><article class="metric featured"><span>模拟账户净值</span><strong id="equity">—</strong><small id="daily-pnl">—</small></article><article class="metric"><span>现金</span><strong id="cash">—</strong><small>不使用融资买入</small></article><article class="metric"><span>券商购买力</span><strong id="buying-power">—</strong><small id="account-status">—</small></article><article class="metric"><span>市场状态</span><strong id="market-state">—</strong><small id="market-next">—</small></article></div>
       <div class="two-column"><article class="panel"><div class="panel-head"><div><p class="eyebrow">PAPER ACCOUNT</p><h2>账户净值轨迹</h2></div><select id="equity-period" aria-label="净值时间范围"><option value="1M">近一个月</option><option value="1W">近一周</option><option value="3M">近三个月</option></select></div><div id="equity-chart" class="chart" aria-label="模拟账户净值图"></div><p class="caption" id="equity-caption">读取 Alpaca 账户历史…</p></article>
@@ -165,7 +166,7 @@
 </div>
 <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form" class="dialog-content" method="post" action="/api/v1/auth/login"><div class="panel-head"><h2 id="login-title">登录模拟交易工作台</h2><button type="button" data-close="login-dialog" aria-label="关闭登录">×</button></div><p class="caption">使用独立的网站账号和密码。登录后可操作当前课程模拟账户；会话有效期为 8 小时。</p><div class="stack"><label>账号<input id="login-username" name="username" autocomplete="username" maxlength="100" required></label><label>密码<input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128" required></label></div><p id="login-error" class="notice error" role="alert" hidden></p><div class="actions"><button type="button" data-close="login-dialog">继续以访客查看</button><button type="submit" id="login-submit" class="primary">登录</button></div></form></dialog>
 <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-content"><div class="panel-head"><h2 id="help-title" tabindex="-1">常见问题</h2><button data-close="help-dialog" aria-label="关闭说明">×</button></div>
-<details open><summary>第一次用，从哪里开始？</summary><p>登录后打开“选策略 · 开始模拟”，选择市场，查看历史表现，填写预算并确认。之后到“策略运行与记录”查看状态。</p></details>
+<details open><summary>第一次用，从哪里开始？</summary><p>先打开“策略研究”，无需登录。分别选择选股、买卖与仓位规则，查看理由、扣成本表现和历史记录。完成研究后再进入独立的模拟执行页，登录并确认预算。</p></details>
 <details><summary>回测赚钱，账户就会赚钱吗？</summary><p>不会。回测是用历史价格检验规则；账户资金只随实际模拟成交变化。最大回撤表示历史上从高点最多跌了多少。</p></details>
 <details><summary>为什么开启策略后没有买入？</summary><p>休市、行情未更新、没有买入信号或风控限制都会让策略等待。先看运行说明，再到对应市场核对订单。</p></details>
 <details><summary>暂停、撤单和平仓有什么区别？</summary><p>暂停阻止后续执行；撤单申请取消未成交委托；平仓卖出已有持仓。三个操作不能互相替代，撤单和平仓都要等待券商回报。</p></details>

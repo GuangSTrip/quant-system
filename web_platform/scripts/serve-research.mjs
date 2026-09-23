@@ -5,7 +5,7 @@ const ca=readFileSync(new URL('../.lan/server-cert.pem',import.meta.url));
 const clients=new Map(),connections=new Map();let inflight=0;
 setInterval(()=>{const now=Date.now();for(const [ip,v] of clients)if(now-v.start>60000)clients.delete(ip);},30000).unref();
 const campusIP=ip=>ip==='127.0.0.1'||/^10\.250\.\d{1,3}\.\d{1,3}$/.test(ip);
-const assets=new Set(['/','/index.html','/styles.css','/app.js','/research-baseline.json','/library-demo.json','/current-daily-plan.json','/historical-daily-results.json','/modular-daily-results.json','/daily-refinement.json','/api/v1/portfolio/catalog','/api/v1/portfolio/report']);
+const assets=new Set(['/','/index.html','/styles.css','/app.js','/research-baseline.json','/library-demo.json','/current-daily-plan.json','/historical-daily-results.json','/modular-daily-results.json','/daily-refinement.json','/course-benchmarks.json','/course-fund-benchmarks.json','/api/v1/portfolio/catalog','/api/v1/portfolio/report']);
 const notice='内网研究入口：可浏览历史策略与报告，不提供登录或交易操作。';
 const script=`document.addEventListener('DOMContentLoaded',()=>{if(!location.hash)location.hash='#daily';const banner=document.createElement('div');banner.setAttribute('role','status');banner.textContent=${JSON.stringify(notice)};document.querySelector('main').prepend(banner);banner.className='panel';document.addEventListener('click',e=>{if(e.target.closest('#sign-in,#sign-out')){e.preventDefault();e.stopImmediatePropagation();alert(${JSON.stringify(notice)});}},true);});`;
 const css='\n#sign-in,#sign-out,.nav-group:has([data-view="overview"]),.nav-group:has([data-view="risk"]){display:none!important}\n';

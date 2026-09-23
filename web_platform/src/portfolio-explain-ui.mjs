@@ -10,7 +10,8 @@ export function createExplanationUI(root,api,access,budget,onReadiness=()=>{},la
  const refresh=el('button','读取账户，更新股数预览');refresh.type='button';
  const budgetRow=document.createElement('div');budgetRow.className='form-row';budgetRow.append(budget.closest('label'),refresh);
  const rulesHeading=el('h3','这套策略怎么买卖');rulesHeading.className='daily-strategy-rules';rules.className='daily-strategy-rules';rulesRoot.append(rulesHeading,rules);
- root.append(el('h2','③ 查看最新选股'),el('p','这是策略按最新数据选出的目标股票。沿用同一套规则，历史回测与后续模拟交易才有可比性；股票由策略决定，不必自行挑选。'),signal);
+ const planHeading=el('h2','① 模拟计划 · 等待信号');
+ root.append(planHeading,el('p','这是策略按最新数据选出的目标股票。沿用同一套规则，历史回测与后续模拟交易才有可比性；股票由策略决定，不必自行挑选。'),signal);
  const planning=document.createElement('div');planning.append(budgetRow,feedback,preview);
  launch.querySelector('h2').after(planning);
  function render(result){
@@ -41,8 +42,8 @@ export function createExplanationUI(root,api,access,budget,onReadiness=()=>{},la
   try{const data=await api('portfolio/explanation?id='+encodeURIComponent(id));if(token!==version)return;info=data;
    for(const [key,title]of [['selection','选什么股票'],['timing','何时买入 / 卖出'],['allocation','每只分多少钱'],['risk','额外仓位控制'],['cadence','什么时候更新']]){const p=el('p','');p.append(el('strong',title+'：'),el('span',data.rules[key]));rules.append(p);}
    signal.replaceChildren();
-   if(data.signal){const s=data.signal;signal.append(el('p',`信号日期 ${s.signal_date} · 目标最近调整 ${s.rebalance_date} · 可执行窗口 ${stamp(s.execute_after)} 至 ${stamp(s.expires_at)}`));signal.append(el('p',`当前信号股票池共 ${data.universe.length} 只，目标持有 ${s.targets.length} 只；并非全市场扫描。以下是策略目标，不是已经成交的持仓。`));if(Date.now()>=Date.parse(s.expires_at))signal.append(el('p','此信号已过期，以下仅作展示；后台更新后才会用于模拟交易。'));const table=document.createElement('table'),head=table.createTHead().insertRow();for(const title of ['股票代码','股票名称','目标资金比例'])head.append(el('th',title));for(const t of s.targets){const row=table.createTBody().insertRow();for(const value of [t.symbol,stockNames.names[t.symbol]||'名称暂缺',percent(t.weight)])row.append(el('td',value));}const wrap=document.createElement('div');wrap.className='table-scroll';wrap.append(table);signal.append(wrap,el('p',s.targets.length?'另保留 '+percent(s.cash_weight)+' 现金；下一步按预算计算股数。':'当前没有股票满足条件，策略选择持有现金。'));signal.append(el('p','策略从这些股票中筛选：'+data.universe.map(s=>(stockNames.names[s]||'名称暂缺')+'（'+s+'）').join('、')));}
-   else signal.append(el('p','后台尚未生成此策略的最新信号，请等待数据更新。'));
+   if(data.signal){const s=data.signal;planHeading.textContent=Date.now()>=Date.parse(s.expires_at)?'① 历史计划已过期 · '+s.signal_date:'① 模拟计划 · 依据 '+s.signal_date+' 收盘数据';signal.append(el('p',`信号日期 ${s.signal_date} · 目标最近调整 ${s.rebalance_date} · 可执行窗口 ${stamp(s.execute_after)} 至 ${stamp(s.expires_at)}`));signal.append(el('p',`当前信号股票池共 ${data.universe.length} 只，目标持有 ${s.targets.length} 只；并非全市场扫描。以下是策略目标，不是已经成交的持仓。`));if(Date.now()>=Date.parse(s.expires_at))signal.append(el('p','此信号已过期，以下仅作展示；后台更新后才会用于模拟交易。'));const table=document.createElement('table'),head=table.createTHead().insertRow();for(const title of ['股票代码','股票名称','目标资金比例'])head.append(el('th',title));for(const t of s.targets){const row=table.createTBody().insertRow();for(const value of [t.symbol,stockNames.names[t.symbol]||'名称暂缺',percent(t.weight)])row.append(el('td',value));}const wrap=document.createElement('div');wrap.className='table-scroll';wrap.append(table);signal.append(wrap,el('p',s.targets.length?'另保留 '+percent(s.cash_weight)+' 现金；下一步按预算计算股数。':'当前没有股票满足条件，策略选择持有现金。'));signal.append(el('p','策略从这些股票中筛选：'+data.universe.map(s=>(stockNames.names[s]||'名称暂缺')+'（'+s+'）').join('、')));}
+   else {planHeading.textContent='① 模拟计划 · 尚无信号';signal.append(el('p','后台尚未生成此策略的最新信号，请等待数据更新。'));}
    render(budgetPreview(data.signal,Number(budget.value)));if(access())await readAccount();
   }catch(e){if(token===version){signal.replaceChildren(el('p','最新选股读取失败：'+e.message));onReadiness('暂时不能确认启动条件：'+e.message);}}
  }};

@@ -25,6 +25,7 @@ export function createRefinement(root,chart){
     const all=[s.selected,s.previous,...s.experiments];const r=all.find(x=>x.id===$('dr-choice').value)||s.selected;
     $('dr-heading').textContent=names[market]+' · '+(market==='CN'?'提高收益的取舍':'降低回撤的取舍');
     $('dr-status').textContent=market==='CN'?'A 股本轮候选仍未达到年化 8%；收益改善伴随更大回撤。再迟一天成交，年化降至 '+pct(s.delayed_open.full.cagr_pct)+'，改善尚不稳健。':market==='HK'?'港股本轮候选达到全段年化 8% / 回撤 5% 的参考线；成本加倍后，2026 年单段年化为 '+pct(s.double_cost.review.cagr_pct)+'。不是实盘保证。':'美股保留已有的通道突破组合；新增降风险方案未能同时保住年化 8%。候选成本加倍后全段年化降至 '+pct(s.double_cost.full.cagr_pct)+'。';
+    if(r.id!==s.selected.id)$('dr-status').textContent='当前查看实验方案：'+label(r)+'。下方指标对应当前方案；尚未单独保存该方案的成本与延迟压力测试。';
     const selection={earnings_value:'历史盈利为正，按盈利 / 股价排序，选前 30 只。',dividend_defensive:'综合股息率（60%）和低波动（40%）排名，选前 30 只。',balanced_value:'盈利收益率、半年动量和低波动排名等权综合，选前 30 只。',smooth_momentum:'半年涨幅 / 波动率，与近 120 日上涨天数比例各占一半，选前 30 只。',near_high:'按收盘价接近过去 252 日高点的程度排序，选前 20 只。',momentum:'按过去约一年涨幅排名、跳过最近一月，选前 20 只。'};
     $('dr-selection').textContent=selection[r.selection]||oldNames.selection[r.selection];
     $('dr-timing').textContent={monthly:'每 21 个交易日重新排名；落选卖出、新入选买入，期间持有。',trend:'每 21 日重选；入选且高于 120 日均线才持有，跌破或落选卖出。',breakout:'入选且突破此前 55 日高点买入；跌破此前 20 日低点或落选卖出。'}[r.timing]+' 收盘判断，下一交易日开盘模拟成交。';
@@ -37,6 +38,7 @@ export function createRefinement(root,chart){
     chart('dr-chart',refinementPoints(s.dates,r.equity,s.previous.equity,mode),[{key:'previous',name:'上次报告方案',color:'#a4832c'},{key:'current',name:'当前展示方案',color:'#527347'}],mode==='drawdown'?pct:v=>v.toFixed(2));
     $('dr-chart-note').textContent=mode==='drawdown'?'越接近 0% 越稳，负数表示距此前最高资金水平的跌幅。收紧仓位通常会让下跌变浅，也会削弱上涨。':'两条线都从 1.00 开始，1.10 表示累计赚 10%，不是年化收益。绿色更高表示累计收益更多；是否更稳请切换回撤曲线。';
     $('dr-stress').textContent=`以下压力检查只对应“本轮候选”：${s.selected.label}。交易成本加倍：全段年化 ${pct(s.double_cost.full.cagr_pct)} / 回撤 ${pct(-s.double_cost.full.max_drawdown_pct)}；成交再延迟一天：年化 ${pct(s.delayed_open.full.cagr_pct)} / 回撤 ${pct(-s.delayed_open.full.max_drawdown_pct)}。`;
+    if(r.id!==s.selected.id)$('dr-stress').textContent='当前方案未保存独立压力测试，不套用默认候选的结果。';
     $('dr-method').textContent=s.definitions.details+' 选择口径：A 股在全段回撤 ≤10%、2026 年收益非负中选全段年化较高者；港股在全段回撤 ≤5%、全段及 2026 年年化 ≥8% 中选全段收益较高者；美股在全段年化 ≥8%、2026 年收益非负中选回撤较低者。均为事后探索选择。';
   }
   function show(){
