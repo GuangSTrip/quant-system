@@ -19,7 +19,7 @@ test('a policy edit invalidates the old process until it loads the new revision'
  const dir=mkdtempSync(join(tmpdir(),'quant-gateway-test-'));
  try {
   const base=pathToFileURL(dir+'/');
-  for(const file of ['serve-campus.mjs','campus-network.mjs','gateway-runtime.mjs'])writeFileSync(join(dir,file),'original');
+  for(const file of ['serve-campus.mjs','campus-network.mjs','gateway-runtime.mjs','gateway-audit.mjs'])writeFileSync(join(dir,file),'original');
   const running={ok:true,policyVerified:true,revision:gatewayRevision(base)};
   assert.equal(gatewayRuntimeMatches(running,gatewayRevision(base)),true);
   writeFileSync(join(dir,'campus-network.mjs'),'updated campus allowlist');
@@ -27,7 +27,7 @@ test('a policy edit invalidates the old process until it loads the new revision'
   assert.equal(gatewayRuntimeMatches(running,expected),false);
   assert.equal(gatewayRuntimeMatches({...running,revision:expected},expected),true);
  } finally {
-  for(const file of ['serve-campus.mjs','campus-network.mjs','gateway-runtime.mjs'])unlinkSync(join(dir,file));
+  for(const file of ['serve-campus.mjs','campus-network.mjs','gateway-runtime.mjs','gateway-audit.mjs'])unlinkSync(join(dir,file));
   rmdirSync(dir);
  }
 });

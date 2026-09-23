@@ -4,7 +4,10 @@ import https from 'node:https';
 import {readFileSync} from 'node:fs';
 import {campusIP} from './campus-network.mjs';
 import {gatewayRevision,gatewayPolicyVerified} from './gateway-runtime.mjs';
-const runtime={ok:true,revision:gatewayRevision(),policyVerified:gatewayPolicyVerified(campusIP),startedAt:new Date().toISOString()};
+import {createGatewayAudit} from './gateway-audit.mjs';
+import {fileURLToPath} from 'node:url';
+const audit=createGatewayAudit(fileURLToPath(new URL('../.lan/gateway-access.jsonl',import.meta.url)));
+const runtime={ok:true,revision:gatewayRevision(),policyVerified:gatewayPolicyVerified(campusIP),startedAt:new Date().toISOString(),audit:audit.state};
 const ca=readFileSync(new URL('../.lan/server-cert.pem',import.meta.url));
 const clients=new Map(),connections=new Map();let inflight=0;
 const hosts=new Set(['10.250.27.137:8791','127.0.0.1:8791','localhost:8791']);
@@ -22,6 +25,9 @@ function sessionCookie(header=''){
 const assets=new Set(['/','/index.html','/styles.css','/app.js','/research-baseline.json','/library-demo.json','/current-daily-plan.json','/historical-daily-results.json','/modular-daily-results.json','/daily-refinement.json','/course-benchmarks.json','/course-fund-benchmarks.json']);
 export const server=http.createServer((req,res)=>{
  const ip=req.socket.remoteAddress,host=req.headers.host;
+ const started=performance.now();let finished=false;
+ res.once('finish',()=>{finished=true;audit.log({event:'http',ip,method:req.method,path:req.url,status:res.statusCode,ms:Math.round(performance.now()-started)});});
+ res.once('close',()=>{if(!finished)audit.log({event:'http_aborted',ip,method:req.method,path:req.url,ms:Math.round(performance.now()-started)});});
  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');
  if(!campusIP(ip))return json(res,403,{ok:false,error:'该来源不在已配置校园网范围内。'});
  if(!hosts.has(host))return json(res,403,{ok:false,error:'访问地址不正确。'});
@@ -80,5 +86,5 @@ export const server=http.createServer((req,res)=>{
  });
 });
 server.headersTimeout=10000;server.requestTimeout=15000;server.keepAliveTimeout=3000;server.maxRequestsPerSocket=100;server.maxConnections=128;
-server.on('connection',socket=>{const ip=socket.remoteAddress;const n=(connections.get(ip)||0)+1;if(!campusIP(ip)||n>12){socket.destroy();return;}connections.set(ip,n);socket.setTimeout(130000,()=>socket.destroy());socket.once('close',()=>{const left=(connections.get(ip)||1)-1;if(left)connections.set(ip,left);else connections.delete(ip);});});
+server.on('connection',socket=>{const ip=socket.remoteAddress;const n=(connections.get(ip)||0)+1;if(!campusIP(ip)||n>12){audit.log({event:'connection_rejected',ip,reason:!campusIP(ip)?'source_not_allowed':'connection_limit'});socket.destroy();return;}audit.log({event:'connection',ip});connections.set(ip,n);socket.setTimeout(130000,()=>socket.destroy());socket.once('close',()=>{const left=(connections.get(ip)||1)-1;if(left)connections.set(ip,left);else connections.delete(ip);});});
 server.listen(8791,'0.0.0.0',()=>console.log('Campus full-function HTTP gateway listening on port 8791'));
